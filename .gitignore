@@ -1,0 +1,4 @@
+# dep backups
+_vendor-*
+
+*.exe

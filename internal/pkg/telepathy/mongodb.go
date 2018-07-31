@@ -2,10 +2,10 @@ package telepathy
 
 import (
 	"context"
-	"log"
 	"os"
 
 	"github.com/mongodb/mongo-go-driver/mongo"
+	"github.com/sirupsen/logrus"
 )
 
 type mongoDatabase struct {
@@ -23,7 +23,8 @@ func getter() Database {
 	database := &mongoDatabase{}
 	err := database.connect()
 	if err != nil {
-		log.Fatal(err)
+		logrus.Error("MongoDB connection failed.")
+		panic(err)
 	}
 	return database
 }

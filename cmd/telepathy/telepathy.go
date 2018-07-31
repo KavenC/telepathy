@@ -1,12 +1,12 @@
 package main
 
 import (
-	"log"
 	"os"
 
+	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
 func main() {
-	log.Fatal(telepathy.Start(os.Getenv("TELEPATHY_DB_TYPE"), os.Getenv("PORT")))
+	logrus.Fatal(telepathy.Start(os.Getenv("TELEPATHY_DB_TYPE"), os.Getenv("PORT")))
 }

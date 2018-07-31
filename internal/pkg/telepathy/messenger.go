@@ -1,7 +1,7 @@
 package telepathy
 
 import (
-	"log"
+	"github.com/sirupsen/logrus"
 )
 
 // MsgrUserProfile holds the information of a messenger user
@@ -28,7 +28,7 @@ var messengerList map[string]Messenger
 
 // RegisterMessenger registers a Messenger handler
 func RegisterMessenger(messenger Messenger) {
-	log.Print("Registering Messenger: " + messenger.name())
+	logrus.Info("Registering Messenger: " + messenger.name())
 	if messengerList == nil {
 		messengerList = make(map[string]Messenger)
 	}
@@ -42,7 +42,7 @@ func RegisterMessenger(messenger Messenger) {
 
 // HandleMessage handles incoming message from messengers
 func HandleMessage(message *Message) {
-	log.Print("Message: name=" + message.Messenger.name() +
+	logrus.Info("Message: name=" + message.Messenger.name() +
 		" from=" + message.SourceProfile.DisplayName +
 		" text=" + message.Text +
 		" reply=" + message.ReplyID)

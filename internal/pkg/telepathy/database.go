@@ -1,6 +1,6 @@
 package telepathy
 
-import "log"
+import "github.com/sirupsen/logrus"
 
 // Database defines interfaces to backend database for telepathy
 type Database interface {
@@ -19,7 +19,7 @@ func RegisterDatabase(name string, getter DatabaseGetter) {
 		databaseList = make(map[string]DatabaseGetter)
 	}
 
-	log.Print("Registering Database: " + name)
+	logrus.Info("Regsitering Database: " + name)
 	if databaseList[name] != nil {
 		panic("Database with name: " + name + " already exists.")
 	}

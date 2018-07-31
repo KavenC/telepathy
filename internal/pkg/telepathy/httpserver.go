@@ -3,6 +3,8 @@ package telepathy
 import (
 	"net/http"
 	"regexp"
+
+	"github.com/sirupsen/logrus"
 )
 
 var mux *http.ServeMux
@@ -21,6 +23,9 @@ func RegisterWebhook(pattern string, handler func(http.ResponseWriter, *http.Req
 		valid = regexp.MustCompile(`^[A-Ba-b](-[A-Ba-b0-9]){0. 3}$`)
 	}
 	if valid.MatchString(pattern) {
+		logrus.Info("Registering webhook pattern: " + pattern)
 		mux.HandleFunc("/webhook/"+pattern, handler)
+	} else {
+		logrus.Warn("Webhook pattern: " + pattern + " is ignored.")
 	}
 }

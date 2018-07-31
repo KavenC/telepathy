@@ -1,11 +1,11 @@
 package telepathy
 
 import (
-	"log"
 	"net/http"
 	"os"
 
 	"github.com/line/line-bot-sdk-go/linebot"
+	"github.com/sirupsen/logrus"
 )
 
 func init() {
@@ -27,7 +27,8 @@ func (m *LineMessenger) start() {
 		os.Getenv("LINE_CHANNEL_TOKEN"),
 	)
 	if err != nil {
-		log.Fatal(err)
+		logrus.Error("LINE starts failed: " + err.Error())
+		return
 	}
 	m.bot = bot
 	RegisterWebhook("line-callback", m.handler)
@@ -53,7 +54,7 @@ func (m *LineMessenger) handler(response http.ResponseWriter, request *http.Requ
 				message.SourceProfile = m.getSourceProfile(event.Source)
 				message.Text = lineMessage.Text
 				if message.SourceProfile == nil {
-					log.Print("Warning: ignored message with unknown source")
+					logrus.Warn("Ignored message with unknown source")
 				} else {
 					HandleMessage(&message)
 				}
@@ -66,26 +67,29 @@ func (m *LineMessenger) getSourceProfile(source *linebot.EventSource) *MsgrUserP
 	if source.GroupID != "" {
 		profile, err := m.bot.GetGroupMemberProfile(source.GroupID, source.UserID).Do()
 		if err != nil {
-			log.Print("Error: " + err.Error())
+			logger := logrus.WithFields(logrus.Fields{"GroupID": source.GroupID, "UserID": source.UserID})
+			logger.Error("GetGroupMemberProfile failed: " + err.Error())
 			return nil
 		}
 		return &MsgrUserProfile{ID: profile.UserID, DisplayName: profile.DisplayName}
 	} else if source.UserID != "" {
 		profile, err := m.bot.GetProfile(source.UserID).Do()
 		if err != nil {
-			log.Print("Error: " + err.Error())
+			logger := logrus.WithField("UserID", source.UserID)
+			logger.Error("GetProfile failed: " + err.Error())
 			return nil
 		}
 		return &MsgrUserProfile{ID: profile.UserID, DisplayName: profile.DisplayName}
 	} else if source.RoomID != "" {
 		profile, err := m.bot.GetRoomMemberProfile(source.RoomID, source.UserID).Do()
 		if err != nil {
-			log.Print("Error: " + err.Error())
+			logger := logrus.WithFields(logrus.Fields{"RoomID": source.RoomID, "UserID": source.UserID})
+			logger.Error("GetRoomMemberProfile failed: " + err.Error())
 			return nil
 		}
 		return &MsgrUserProfile{ID: profile.UserID, DisplayName: profile.DisplayName}
 	} else {
-		log.Print("Warning: Unknown source " + source.Type)
+		logrus.Warn("Unknown source " + source.Type)
 		return nil
 	}
 }

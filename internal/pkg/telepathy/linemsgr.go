@@ -30,7 +30,7 @@ func (m *LineMessenger) start() {
 		log.Fatal(err)
 	}
 	m.bot = bot
-	RegisterHTTPHandleFunc("/line_callback", m.handler)
+	RegisterWebhook("line-callback", m.handler)
 }
 
 func (m *LineMessenger) handler(response http.ResponseWriter, request *http.Request) {

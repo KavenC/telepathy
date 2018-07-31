@@ -1,14 +1,26 @@
 package telepathy
 
-import "net/http"
+import (
+	"net/http"
+	"regexp"
+)
 
 var mux *http.ServeMux
+var valid *regexp.Regexp
 
 func init() {
 	mux = http.NewServeMux()
 }
 
-// RegisterHTTPHandleFunc is used for messenger handler to register http callback
-func RegisterHTTPHandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	mux.HandleFunc(pattern, handler)
+// RegisterWebhook is used to register a http callback, like webhooks
+// The pattern can only be in this regular expression format: ^[A-Ba-b](-[A-Ba-b0-9]){0. 3}$, otherwise it is ignored.
+// If the pattern is already registered, it panics.
+// Webhooks are always registered at (host)/webhook/<patter>
+func RegisterWebhook(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	if valid == nil {
+		valid = regexp.MustCompile(`^[A-Ba-b](-[A-Ba-b0-9]){0. 3}$`)
+	}
+	if valid.MatchString(pattern) {
+		mux.HandleFunc("/webhook/"+pattern, handler)
+	}
 }

@@ -1,6 +1,8 @@
 package telepathy
 
 import (
+	"strings"
+
 	"github.com/sirupsen/logrus"
 )
 
@@ -10,25 +12,33 @@ type MsgrUserProfile struct {
 	DisplayName string
 }
 
-// Message is a general type of message that will be used in telepathy
-type Message struct {
+// InboundMessage models a message send to Telepthy bot
+type InboundMessage struct {
 	Messenger     Messenger
 	SourceProfile *MsgrUserProfile
-	ReplyID       string
+	SourceID      string
 	Text          string
+}
+
+// OutboundMessage models a message send to Client (through messenger)
+type OutboundMessage struct {
+	TargetID string
+	Text     string
 }
 
 // Messenger defines the interface of a messenger handler
 type Messenger interface {
 	name() string
 	start()
+	send(*OutboundMessage)
 }
 
 var messengerList map[string]Messenger
 
 // RegisterMessenger registers a Messenger handler
 func RegisterMessenger(messenger Messenger) {
-	logrus.Info("Registering Messenger: " + messenger.name())
+	logger := logrus.WithField("messenger", messenger.name())
+	logger.Info("Registering Messenger.")
 	if messengerList == nil {
 		messengerList = make(map[string]Messenger)
 	}
@@ -41,9 +51,30 @@ func RegisterMessenger(messenger Messenger) {
 }
 
 // HandleMessage handles incoming message from messengers
-func HandleMessage(message *Message) {
-	logrus.Info("Message: name=" + message.Messenger.name() +
-		" from=" + message.SourceProfile.DisplayName +
-		" text=" + message.Text +
-		" reply=" + message.ReplyID)
+func HandleMessage(message *InboundMessage) {
+	if isCmdMsg(message.Text) {
+		// Got a command message
+		// Parse it with command interface
+		args := getCmdFromMsg(message.Text)
+		logger := logrus.WithFields(logrus.Fields{
+			"messenger": message.Messenger.name(),
+			"source":    message.SourceID,
+			"args":      args})
+		logger.Info("Got command message.")
+		rootCmd.SetArgs(args)
+		var buffer strings.Builder
+		rootCmd.SetOutput(&buffer)
+		rootCmd.Execute()
+
+		// If there is some stirng output, forward it back to user
+		if buffer.Len() > 0 {
+			replyMsg := &OutboundMessage{TargetID: message.SourceID, Text: buffer.String()}
+			logger = logrus.WithFields(logrus.Fields{
+				"messenger": message.Messenger.name(),
+				"target":    replyMsg.TargetID,
+			})
+			logger.Info("Send command reply")
+			message.Messenger.send(replyMsg)
+		}
+	}
 }

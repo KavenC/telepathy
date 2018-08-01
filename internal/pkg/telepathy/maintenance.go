@@ -19,10 +19,21 @@ func Start(databaseType string, port string) error {
 	}
 	database = getter()
 
+	// Initializes messenger handlers
 	for _, messenger := range messengerList {
-		messenger.start()
+		err := messenger.init()
+		if err != nil {
+			logger := logrus.WithField("messenger", messenger.name())
+			logger.Error("Init fail.")
+		}
 	}
 
+	// Starts messenger handlers
+	for _, messenger := range messengerList {
+		go messenger.start()
+	}
+
+	// Webhook stype messengers are handled together with a http server
 	server := http.Server{Addr: ":" + port, Handler: mux}
 	return server.ListenAndServe()
 }

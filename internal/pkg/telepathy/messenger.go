@@ -29,6 +29,7 @@ type OutboundMessage struct {
 // Messenger defines the interface of a messenger handler
 type Messenger interface {
 	name() string
+	init() error
 	start()
 	send(*OutboundMessage)
 }
@@ -50,8 +51,8 @@ func RegisterMessenger(messenger Messenger) {
 	messengerList[messenger.name()] = messenger
 }
 
-// HandleMessage handles incoming message from messengers
-func HandleMessage(message *InboundMessage) {
+// HandleInboundMessage handles incoming message from messengers
+func HandleInboundMessage(message *InboundMessage) {
 	if isCmdMsg(message.Text) {
 		// Got a command message
 		// Parse it with command interface

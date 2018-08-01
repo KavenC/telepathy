@@ -22,17 +22,22 @@ func (m *LineMessenger) name() string {
 	return "LINE"
 }
 
-func (m *LineMessenger) start() {
+func (m *LineMessenger) init() error {
 	bot, err := linebot.New(
 		os.Getenv("LINE_CHANNEL_SECRET"),
 		os.Getenv("LINE_CHANNEL_TOKEN"),
 	)
 	if err != nil {
-		logrus.Error("LINE starts failed: " + err.Error())
-		return
+		return err
 	}
 	m.bot = bot
 	RegisterWebhook("line-callback", m.handler)
+
+	return nil
+}
+
+func (m *LineMessenger) start() {
+
 }
 
 func (m *LineMessenger) handler(response http.ResponseWriter, request *http.Request) {
@@ -58,7 +63,7 @@ func (m *LineMessenger) handler(response http.ResponseWriter, request *http.Requ
 				if message.SourceProfile == nil {
 					logrus.Warn("Ignored message with unknown source")
 				} else {
-					HandleMessage(&message)
+					HandleInboundMessage(&message)
 				}
 			}
 		}

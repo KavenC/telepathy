@@ -1,8 +1,13 @@
 package telepathy
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -28,12 +33,25 @@ func Start(databaseType string, port string) error {
 		}
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	// Starts messenger handlers
 	for _, messenger := range messengerList {
-		go messenger.start()
+		go messenger.start(ctx)
 	}
-
 	// Webhook stype messengers are handled together with a http server
 	server := http.Server{Addr: ":" + port, Handler: mux}
-	return server.ListenAndServe()
+	go server.ListenAndServe()
+
+	// Wait here until CTRL-C or other term signal is received.
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
+	<-sc
+
+	cancel()
+
+	timeout, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+
+	return server.Shutdown(timeout)
 }

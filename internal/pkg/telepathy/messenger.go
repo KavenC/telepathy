@@ -1,6 +1,7 @@
 package telepathy
 
 import (
+	"context"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -30,7 +31,7 @@ type OutboundMessage struct {
 type Messenger interface {
 	name() string
 	init() error
-	start()
+	start(context.Context)
 	send(*OutboundMessage)
 }
 
@@ -62,6 +63,7 @@ func HandleInboundMessage(message *InboundMessage) {
 			"source":    message.SourceID,
 			"args":      args})
 		logger.Info("Got command message.")
+
 		rootCmd.SetArgs(args)
 		var buffer strings.Builder
 		rootCmd.SetOutput(&buffer)

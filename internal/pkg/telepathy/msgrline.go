@@ -1,6 +1,7 @@
 package telepathy
 
 import (
+	"context"
 	"net/http"
 	"os"
 
@@ -36,8 +37,8 @@ func (m *LineMessenger) init() error {
 	return nil
 }
 
-func (m *LineMessenger) start() {
-
+func (m *LineMessenger) start(_ context.Context) {
+	// Call back type bot, do nothing chere
 }
 
 func (m *LineMessenger) handler(response http.ResponseWriter, request *http.Request) {

@@ -1,9 +1,8 @@
 package telepathy
 
 import (
+	"context"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/sirupsen/logrus"
@@ -32,7 +31,7 @@ func (m *DiscordMessenger) init() error {
 	return nil
 }
 
-func (m *DiscordMessenger) start() {
+func (m *DiscordMessenger) start(ctx context.Context) {
 	// Open a websocket connection to Discord and begin listening.
 	err := m.bot.Open()
 	if err != nil {
@@ -41,10 +40,8 @@ func (m *DiscordMessenger) start() {
 		return
 	}
 
-	// Wait here until CTRL-C or other term signal is received.
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
-	<-sc
+	// Run until being cancelled
+	<-ctx.Done()
 
 	logrus.WithField("messenger", m.name()).Info("Terminating.")
 	// Cleanly close down the Discord session.

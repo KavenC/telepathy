@@ -23,6 +23,10 @@ type MsgUser struct {
 // The IDs prefixed with reservedIDPrefix are reserved for internal use (ex. Testing)
 var reservedIDPrefix = "__"
 
+func getReservedUserID(id string) string {
+	return reservedIDPrefix + id
+}
+
 // CreateUser creates and returns a new Telepathy user.
 func createUser(id string) (*User, error) {
 	// ID prefixed with reservedIDPrefix is reserved for internal use
@@ -30,13 +34,15 @@ func createUser(id string) (*User, error) {
 		return nil, errors.New("Invalid User ID. User ID must not be prefixed with " + reservedIDPrefix)
 	}
 
-	find := database.findUser(id)
+	db := getDatabase()
+
+	find := db.findUser(id)
 	if find != nil {
 		return nil, errors.New("User with ID: " + id + " already exists.")
 	}
 
 	// Create user in database
 	user := &User{ID: id, Privilege: 0}
-	err := database.createUser(user)
+	err := db.createUser(user)
 	return user, err
 }

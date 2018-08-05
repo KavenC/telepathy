@@ -17,6 +17,7 @@ func init() {
 type LineMessenger struct {
 	bot           *linebot.Client
 	replyTokenMap map[string]string
+	ctx           context.Context
 }
 
 func (m *LineMessenger) name() string {
@@ -37,11 +38,17 @@ func (m *LineMessenger) init() error {
 	return nil
 }
 
-func (m *LineMessenger) start(_ context.Context) {
-	// Call back type bot, do nothing chere
+func (m *LineMessenger) start(ctx context.Context) {
+	m.ctx = ctx
 }
 
 func (m *LineMessenger) handler(response http.ResponseWriter, request *http.Request) {
+	if m.ctx == nil {
+		logger := logrus.WithField("messenger", m.name())
+		logger.Warn("Dropped event.")
+		return
+	}
+
 	events, err := m.bot.ParseRequest(request)
 	if err != nil {
 		if err == linebot.ErrInvalidSignature {

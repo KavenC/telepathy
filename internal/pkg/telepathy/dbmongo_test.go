@@ -14,7 +14,7 @@ func assertEqual(t *testing.T, a interface{}, b interface{}) {
 func TestCreateUser(t *testing.T) {
 	database = databaseList["mongo"]()
 
-	testid := reservedIDPrefix + "testUser"
+	testid := getReservedUserID("testUser")
 	// Create test User object
 	user := User{ID: testid, Privilege: 3, MsgID: make(map[string]string)}
 	user.MsgID["msg1"] = "testid1"
@@ -43,7 +43,7 @@ func TestCreateUser(t *testing.T) {
 func TestFindUser(t *testing.T) {
 	database = databaseList["mongo"]()
 
-	testid := reservedIDPrefix + "testUser"
+	testid := getReservedUserID("testUser")
 	// Create test User object
 	user := User{ID: testid, Privilege: 3, MsgID: make(map[string]string)}
 	user.MsgID["msg1"] = "testid1"

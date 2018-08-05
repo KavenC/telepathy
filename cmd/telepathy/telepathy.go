@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/sirupsen/logrus"
@@ -8,5 +9,14 @@ import (
 )
 
 func main() {
-	logrus.Fatal(telepathy.Start(os.Getenv("TELEPATHY_DB_TYPE"), os.Getenv("PORT")))
+	session := telepathy.Session{
+		Ctx:          context.Background(),
+		DatabaseType: os.Getenv("TELEPATHY_DB_TYPE"),
+		Port:         os.Getenv("PORT"),
+	}
+	err := session.Start()
+
+	if err != nil {
+		logrus.Error(err)
+	}
 }

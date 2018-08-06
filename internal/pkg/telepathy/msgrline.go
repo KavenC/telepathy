@@ -63,6 +63,7 @@ func (m *LineMessenger) handler(response http.ResponseWriter, request *http.Requ
 		if event.Type == linebot.EventTypeMessage {
 			message := InboundMessage{Messenger: m}
 			message.SourceProfile, message.SourceID = m.getSourceProfile(event.Source)
+			message.IsDirectMessage = message.SourceProfile.ID == message.SourceID
 			m.replyTokenMap[message.SourceID] = event.ReplyToken
 			switch lineMessage := event.Message.(type) {
 			case *linebot.TextMessage:

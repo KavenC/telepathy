@@ -67,5 +67,13 @@ func (m *DiscordMessenger) handler(_ *discordgo.Session, dgmessage *discordgo.Me
 		SourceID: dgmessage.ChannelID,
 		Text:     dgmessage.Content,
 	}
+
+	channel, err := m.bot.Channel(dgmessage.ChannelID)
+	if err != nil {
+		logger := logrus.WithField("mssenger", m.name())
+		logger.Error("Get channel fail: " + err.Error())
+	}
+	message.IsDirectMessage = channel.Type == discordgo.ChannelTypeDM
+
 	HandleInboundMessage(&message)
 }

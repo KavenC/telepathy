@@ -15,10 +15,11 @@ type MsgrUserProfile struct {
 
 // InboundMessage models a message send to Telepthy bot
 type InboundMessage struct {
-	Messenger     Messenger
-	SourceProfile *MsgrUserProfile
-	SourceID      string
-	Text          string
+	Messenger       Messenger
+	SourceProfile   *MsgrUserProfile
+	SourceID        string
+	Text            string
+	IsDirectMessage bool
 }
 
 // OutboundMessage models a message send to Client (through messenger)
@@ -67,7 +68,7 @@ func HandleInboundMessage(message *InboundMessage) {
 		rootCmd.SetArgs(args)
 		var buffer strings.Builder
 		rootCmd.SetOutput(&buffer)
-		rootCmd.Execute()
+		rootCmd.Execute(message)
 
 		// If there is some stirng output, forward it back to user
 		if buffer.Len() > 0 {

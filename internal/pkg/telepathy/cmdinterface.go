@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/KavenC/cobra"
 	"github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
 )
 
 var commandPrefix = "#tele#"
@@ -14,7 +14,7 @@ var commandPrefix = "#tele#"
 var rootCmd = &cobra.Command{
 	Use: commandPrefix,
 	DisableFlagsInUseLine: true,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(*cobra.Command, []string, ...interface{}) {
 		// Do nothing
 	},
 }

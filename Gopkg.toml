@@ -36,3 +36,7 @@
 [[constraint]]
   name = "github.com/mongodb/mongo-go-driver"
   version = "0.0.10"
+
+[[constraint]]
+  name = "github.com/KavenC/cobra"
+  branch = "master"

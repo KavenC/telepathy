@@ -3,6 +3,14 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:32c159159ecef17335a2f6d30ea5136c8b2e5497282307ba332f60b11a5d7599"
+  name = "github.com/KavenC/cobra"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "445a6e5cfb8042c3af89e48b2b1c5f3e81c61926"
+
+[[projects]]
+  branch = "master"
   digest = "1:35ac403a135b8a138870950720be1f0399e0a48387d4b5cca841b0ed8cf7a40b"
   name = "github.com/buger/jsonparser"
   packages = ["."]
@@ -50,12 +58,12 @@
   version = "v1.0"
 
 [[projects]]
-  digest = "1:c7e61eb504a4c26cd8b2d1f63a68a21ec65d7dab949be1014fa8514cfa429ecf"
+  digest = "1:6e2470f8698872c20b887e3114f1ce3576cd61ca2d0a3d654db9bdfb0fedb832"
   name = "github.com/line/line-bot-sdk-go"
   packages = ["linebot"]
   pruneopts = "UT"
-  revision = "0d01ff199dd538f1042edcf1f658589730e0422a"
-  version = "2.0.0"
+  revision = "2bb2ee426892d0f0efe6ee399ae2d969fe3ca39f"
+  version = "3.0.0"
 
 [[projects]]
   digest = "1:e4a9fca77a22102c0e6ec6229f58897a75be6c4458e7b1aa99d0fff80866216a"
@@ -123,14 +131,6 @@
   version = "v1.0.6"
 
 [[projects]]
-  digest = "1:872fa275c31e1f9db31d66fa9b1d4a7bb9a080ff184e6977da01f36bfbe07f11"
-  name = "github.com/spf13/cobra"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "ef82de70bb3f60c65fb8eebacbb2d122ef517385"
-  version = "v0.0.3"
-
-[[projects]]
   digest = "1:9424f440bba8f7508b69414634aef3b2b3a877e522d8a4624692412805407bb7"
   name = "github.com/spf13/pflag"
   packages = ["."]
@@ -151,7 +151,7 @@
     "ssh/terminal",
   ]
   pruneopts = "UT"
-  revision = "c126467f60eb25f8f27e5a981f32a87e3965053f"
+  revision = "56440b844dfe139a8ac053f4ecac0b20b79058f4"
 
 [[projects]]
   branch = "master"
@@ -159,7 +159,7 @@
   name = "golang.org/x/net"
   packages = ["context"]
   pruneopts = "UT"
-  revision = "3673e40ba22529d22c3fd7c93e97b0ce50fa7bdd"
+  revision = "f4c29de78a2a91c00474a2e689954305c350adf9"
 
 [[projects]]
   branch = "master"
@@ -171,24 +171,24 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:0871b2afdec96b08397ac286e7dbd2a0875bb75c1d3b22d046e389b9ed68cd83"
+  digest = "1:fdbfac596a38ec195decf850daa9934d5f136a8055ab24eba104fc9406ff12dd"
   name = "golang.org/x/sys"
   packages = [
     "unix",
     "windows",
   ]
   pruneopts = "UT"
-  revision = "bd9dbc187b6e1dacfdd2722a87e83093c2d7bd6e"
+  revision = "34b17bdb430002e9db9ae7ddc8480b9fa05edc22"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
+    "github.com/KavenC/cobra",
     "github.com/bwmarrin/discordgo",
     "github.com/line/line-bot-sdk-go/linebot",
     "github.com/mongodb/mongo-go-driver/mongo",
     "github.com/sirupsen/logrus",
-    "github.com/spf13/cobra",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

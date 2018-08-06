@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Modified version
+// Copyright @ 2018 Chunkai Chou <kavenc@gmail.com>
+
 // Package cobra is a commander providing a simple interface to create powerful modern CLI interfaces.
 // In addition to providing an interface, Cobra simultaneously provides a controller to organize your application code.
 package cobra
@@ -100,7 +103,7 @@ type Command struct {
 	// PreRunE: PreRun but returns an error.
 	PreRunE func(cmd *Command, args []string) error
 	// Run: Typically the actual work function. Most commands will only implement this.
-	Run func(cmd *Command, args []string)
+	Run func(cmd *Command, args []string, extraArgs ...interface{})
 	// RunE: Run but returns an error.
 	RunE func(cmd *Command, args []string) error
 	// PostRun: run after the Run command.
@@ -672,7 +675,7 @@ func (c *Command) ArgsLenAtDash() int {
 	return c.Flags().ArgsLenAtDash()
 }
 
-func (c *Command) execute(a []string) (err error) {
+func (c *Command) execute(a []string, extraArgs ...interface{}) (err error) {
 	if c == nil {
 		return fmt.Errorf("Called Execute() on a nil Command")
 	}
@@ -763,7 +766,7 @@ func (c *Command) execute(a []string) (err error) {
 			return err
 		}
 	} else {
-		c.Run(c, argWoFlags)
+		c.Run(c, argWoFlags, extraArgs...)
 	}
 	if c.PostRunE != nil {
 		if err := c.PostRunE(c, argWoFlags); err != nil {
@@ -796,16 +799,17 @@ func (c *Command) preRun() {
 // Execute uses the args (os.Args[1:] by default)
 // and run through the command tree finding appropriate matches
 // for commands and then corresponding flags.
-func (c *Command) Execute() error {
-	_, err := c.ExecuteC()
+// Arguments are forwarded to the Run function of the running command
+func (c *Command) Execute(extraArgs ...interface{}) error {
+	_, err := c.ExecuteC(extraArgs...)
 	return err
 }
 
 // ExecuteC executes the command.
-func (c *Command) ExecuteC() (cmd *Command, err error) {
+func (c *Command) ExecuteC(extraArgs ...interface{}) (cmd *Command, err error) {
 	// Regardless of what command execute is called on, run on Root only
 	if c.HasParent() {
-		return c.Root().ExecuteC()
+		return c.Root().ExecuteC(extraArgs...)
 	}
 
 	// windows hook
@@ -849,7 +853,7 @@ func (c *Command) ExecuteC() (cmd *Command, err error) {
 		cmd.commandCalledAs.name = cmd.Name()
 	}
 
-	err = cmd.execute(flags)
+	err = cmd.execute(flags, extraArgs...)
 	if err != nil {
 		// Always show help if requested, even if SilenceErrors is in
 		// effect
@@ -951,7 +955,7 @@ func (c *Command) InitDefaultHelpCmd() {
 			Long: `Help provides help for any command in the application.
 Simply type ` + c.Name() + ` help [path to command] for full details.`,
 
-			Run: func(c *Command, args []string) {
+			Run: func(c *Command, args []string, extraArgs ...interface{}) {
 				cmd, _, e := c.Root().Find(args)
 				if cmd == nil || e != nil {
 					c.Printf("Unknown help topic %#q\n", args)

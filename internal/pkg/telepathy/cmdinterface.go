@@ -1,6 +1,7 @@
 package telepathy
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"strings"
@@ -17,6 +18,13 @@ var rootCmd = &cobra.Command{
 	Run: func(*cobra.Command, []string, ...interface{}) {
 		// Do nothing
 	},
+}
+
+// ExtraCmdArgs defines the extra arguments passed to Command.Run callbacks
+// All Command.Run callbacks must call ParseExtraCmdArgs to get these data
+type ExtraCmdArgs struct {
+	Ctx     context.Context
+	Message *InboundMessage
 }
 
 func init() {
@@ -60,6 +68,39 @@ func RegisterCommand(cmd *cobra.Command) error {
 	}
 	rootCmd.AddCommand(cmd)
 	return nil
+}
+
+// CommandParseExtraArgs parse extra command arguments for the Command.Run callbacks
+func CommandParseExtraArgs(logger *logrus.Entry, extras ...interface{}) *ExtraCmdArgs {
+	if len(extras) != 2 {
+		logger.Panic("Insufficient arguments in command handler.")
+	}
+
+	ctx, ctxok := extras[0].(context.Context)
+	message, msgok := extras[1].(*InboundMessage)
+	if !ctxok || !msgok {
+		logger.Panicf("Invalid argument type in command handler: %T, %T", extras[0], extras[1])
+	}
+
+	return &ExtraCmdArgs{
+		Ctx:     ctx,
+		Message: message,
+	}
+}
+
+// CommandEnsureDM checks if command is from direct message
+func CommandEnsureDM(cmd *cobra.Command, extraArgs *ExtraCmdArgs) bool {
+	if !extraArgs.Message.IsDirectMessage {
+		cmd.Print("This command can only be run with Direct Messages (Whispers).")
+		return false
+	}
+
+	return true
+}
+
+// CommandGetPrefix returns the command prefix
+func CommandGetPrefix() string {
+	return commandPrefix
 }
 
 func isCmdMsg(text string) bool {

@@ -2,11 +2,13 @@ package telepathy
 
 import (
 	"os"
+	"sync"
 
 	"github.com/go-redis/redis"
 )
 
-var client *redis.Client
+var redisClient *redis.Client
+var redisLock = &sync.Mutex{}
 
 func initRedis() error {
 	options, err := redis.ParseURL(os.Getenv("REDIS_URL"))
@@ -14,18 +16,23 @@ func initRedis() error {
 		return err
 	}
 
-	client := redis.NewClient(options)
-	_, err = client.Ping().Result()
+	redisClient = redis.NewClient(options)
+	_, err = redisClient.Ping().Result()
 	if err != nil {
 		return err
 	}
 
 	// Flush all
-	err = client.FlushAll().Err()
+	err = redisClient.FlushAll().Err()
 
 	return err
 }
 
 func getRedis() *redis.Client {
-	return client
+	redisLock.Lock()
+	return redisClient
+}
+
+func putRedis() {
+	redisLock.Unlock()
 }

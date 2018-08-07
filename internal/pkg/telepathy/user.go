@@ -22,7 +22,7 @@ type MsgUser struct {
 
 // reservedIDPrefix cannot be prefixed to a User ID
 // The IDs prefixed with reservedIDPrefix are reserved for internal use (ex. Testing)
-var reservedIDPrefix = "__"
+const reservedIDPrefix = "__"
 
 func getReservedUserID(id string) string {
 	return reservedIDPrefix + id

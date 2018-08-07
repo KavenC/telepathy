@@ -21,7 +21,7 @@ func TestCreateUser(t *testing.T) {
 	user.MsgID["msg2"] = "testid2"
 
 	// Create User with database api
-	err := database.createUser(&user)
+	err := database.createUser(context.Background(), &user)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestFindUser(t *testing.T) {
 	}
 
 	// Test find user
-	findUser := database.findUser(testid)
+	findUser := database.findUser(context.Background(), testid)
 	assertEqual(t, user, findUser)
 
 	// Remove test user
@@ -67,6 +67,43 @@ func TestFindUser(t *testing.T) {
 	assertEqual(t, nil, result)
 
 	// Test user not found
-	findUser = database.findUser(testid)
+	findUser = database.findUser(context.Background(), testid)
 	assertEqual(t, findUser, nil)
+}
+
+func TestCreateExistingUser(t *testing.T) {
+	database = databaseList["mongo"]()
+
+	testid := getReservedUserID("testUser")
+	// Create test User object
+	user := User{ID: testid, Privilege: 3, MsgID: make(map[string]string)}
+	user.MsgID["msg1"] = "testid1"
+	user.MsgID["msg2"] = "testid2"
+
+	// Create User with database api
+	err := database.createUser(context.Background(), &user)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an existing user
+	user.MsgID["msg1"] = "testid1_1"
+	user.MsgID["msg2"] = "testid2_2"
+	err = database.createUser(context.Background(), &user)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Use database api to get User back and compare
+	mongohmts := database.(*mongoDatabase)
+	returnedUser := User{}
+	collection := mongohmts.database.Collection(userCollection)
+	result := collection.FindOne(context.Background(), map[string]string{"_id": testid})
+	result.Decode(returnedUser)
+	assertEqual(t, user, returnedUser)
+
+	// Remove test user
+	collection.DeleteOne(context.Background(), map[string]string{"_id": testid})
+	result = collection.FindOne(context.Background(), map[string]string{"_id": testid})
+	assertEqual(t, nil, result)
 }

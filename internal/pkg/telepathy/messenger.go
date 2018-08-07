@@ -54,7 +54,7 @@ func RegisterMessenger(messenger Messenger) {
 }
 
 // HandleInboundMessage handles incoming message from messengers
-func HandleInboundMessage(message *InboundMessage) {
+func HandleInboundMessage(ctx context.Context, message *InboundMessage) {
 	if isCmdMsg(message.Text) {
 		// Got a command message
 		// Parse it with command interface
@@ -68,7 +68,7 @@ func HandleInboundMessage(message *InboundMessage) {
 		rootCmd.SetArgs(args)
 		var buffer strings.Builder
 		rootCmd.SetOutput(&buffer)
-		rootCmd.Execute(message)
+		rootCmd.Execute(ctx, message)
 
 		// If there is some stirng output, forward it back to user
 		if buffer.Len() > 0 {

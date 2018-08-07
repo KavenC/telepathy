@@ -1,6 +1,7 @@
 package telepathy
 
 import (
+	"context"
 	"errors"
 	"strings"
 )
@@ -28,7 +29,7 @@ func getReservedUserID(id string) string {
 }
 
 // CreateUser creates and returns a new Telepathy user.
-func createUser(id string) (*User, error) {
+func createUser(ctx context.Context, id string) (*User, error) {
 	// ID prefixed with reservedIDPrefix is reserved for internal use
 	if strings.HasPrefix(id, reservedIDPrefix) {
 		return nil, errors.New("Invalid User ID. User ID must not be prefixed with " + reservedIDPrefix)
@@ -36,13 +37,13 @@ func createUser(id string) (*User, error) {
 
 	db := getDatabase()
 
-	find := db.findUser(id)
+	find := db.findUser(ctx, id)
 	if find != nil {
 		return nil, errors.New("User with ID: " + id + " already exists.")
 	}
 
 	// Create user in database
 	user := &User{ID: id, Privilege: 0}
-	err := db.createUser(user)
+	err := db.createUser(ctx, user)
 	return user, err
 }

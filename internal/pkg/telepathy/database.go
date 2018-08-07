@@ -1,14 +1,18 @@
 package telepathy
 
-import "github.com/sirupsen/logrus"
+import (
+	"context"
+
+	"github.com/sirupsen/logrus"
+)
 
 var databaseList map[string]DatabaseGetter
 var database Database
 
 // Database defines interfaces to backend database for telepathy
 type Database interface {
-	createUser(*User) error
-	findUser(string) *User
+	createUser(context.Context, *User) error
+	findUser(context.Context, string) *User
 }
 
 // DatabaseGetter defines the function used to get a pointer of Database implementation

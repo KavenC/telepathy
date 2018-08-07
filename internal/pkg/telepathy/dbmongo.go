@@ -12,6 +12,11 @@ type mongoDatabase struct {
 	database *mongo.Database
 }
 
+type mongoUser struct {
+	_id string
+	*User
+}
+
 var userCollection = "User"
 
 func init() {
@@ -46,22 +51,26 @@ func (m *mongoDatabase) connect() error {
 }
 
 // CreateUser creates a user entry in mongo db
-func (m *mongoDatabase) createUser(user *User) error {
+func (m *mongoDatabase) createUser(ctx context.Context, user *User) error {
 	collection := m.database.Collection(userCollection)
-	_, err := collection.InsertOne(context.Background(), user)
+	mongouser := mongoUser{
+		_id:  user.ID,
+		User: user,
+	}
+	_, err := collection.InsertOne(ctx, mongouser)
 	return err
 }
 
 // FindUser find user with ID in mongo db
-func (m *mongoDatabase) findUser(id string) *User {
+func (m *mongoDatabase) findUser(ctx context.Context, id string) *User {
 	collection := m.database.Collection(userCollection)
-	result := collection.FindOne(context.Background(), map[string]string{"ID": id})
+	result := collection.FindOne(ctx, map[string]string{"_id": id})
 	if result == nil {
 		return nil
 	}
 
-	user := User{}
+	user := mongoUser{}
 	result.Decode(user)
 
-	return &user
+	return user.User
 }

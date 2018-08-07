@@ -72,7 +72,7 @@ func (m *LineMessenger) handler(response http.ResponseWriter, request *http.Requ
 				if message.SourceProfile == nil {
 					logrus.Warn("Ignored message with unknown source")
 				} else {
-					HandleInboundMessage(&message)
+					HandleInboundMessage(m.ctx, &message)
 				}
 			}
 		}

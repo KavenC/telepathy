@@ -15,6 +15,7 @@ func init() {
 // DiscordMessenger implements the communication with Discord APP
 type DiscordMessenger struct {
 	bot *discordgo.Session
+	ctx context.Context
 }
 
 func (m *DiscordMessenger) name() string {
@@ -39,6 +40,8 @@ func (m *DiscordMessenger) start(ctx context.Context) {
 		logger.Error("Open websocket connection fail.")
 		return
 	}
+
+	m.ctx = ctx
 
 	// Run until being cancelled
 	<-ctx.Done()
@@ -75,5 +78,5 @@ func (m *DiscordMessenger) handler(_ *discordgo.Session, dgmessage *discordgo.Me
 	}
 	message.IsDirectMessage = channel.Type == discordgo.ChannelTypeDM
 
-	HandleInboundMessage(&message)
+	HandleInboundMessage(m.ctx, &message)
 }

@@ -3,10 +3,22 @@ package telepathy
 import (
 	"context"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
+
+var _ = func() bool {
+	_, production := os.LookupEnv("TELEPATHY_PRODUCTION")
+	if !production {
+		logrus.SetFormatter(&logrus.TextFormatter{DisableColors: true})
+		logrus.Info("== Telepathy Starts in DEVELOPMENT Mode ==")
+	} else {
+		logrus.Info("== Telepathy Starts in PRODUCTION Mode ==")
+	}
+	return true
+}()
 
 // Session defines a Telepathy server session
 type Session struct {
@@ -19,11 +31,20 @@ type Session struct {
 // The function always returns an error when the seesion is terminated
 func (s *Session) Start() error {
 	if s.Ctx == nil {
-		logrus.Fatal("Session Ctx must not be nil")
+		logrus.Panic("Session Ctx must not be nil")
+	}
+
+	// init cache
+	err := initRedis()
+	if err != nil {
+		logrus.Panic("Redis init failed.")
 	}
 
 	// Initializes database handler
-	setDatabase(s.DatabaseType)
+	err = initDatabase(s.DatabaseType)
+	if err != nil {
+		logrus.Panic("Database init failed.")
+	}
 
 	// Initializes messenger handlers
 	for _, messenger := range messengerList {

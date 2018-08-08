@@ -17,6 +17,6 @@ func main() {
 	err := session.Start()
 
 	if err != nil {
-		logrus.Error(err)
+		logrus.Panic(err)
 	}
 }

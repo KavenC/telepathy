@@ -2,6 +2,7 @@ package telepathy
 
 import (
 	"context"
+	"errors"
 
 	"github.com/sirupsen/logrus"
 )
@@ -31,12 +32,14 @@ func RegisterDatabase(name string, getter DatabaseGetter) {
 	databaseList[name] = getter
 }
 
-func setDatabase(dbtype string) {
+func initDatabase(dbtype string) error {
 	getter := databaseList[dbtype]
 	if getter == nil {
-		panic("Invalid database type: " + dbtype)
+		return errors.New("Invalid database type: " + dbtype)
 	}
 	database = getter()
+
+	return nil
 }
 
 func getDatabase() Database {

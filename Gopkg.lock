@@ -26,6 +26,23 @@
   version = "v0.18.0"
 
 [[projects]]
+  digest = "1:94836e6196fd3150edd474bde9afeeea27e7d51700cd3f3d44bb859b1951e998"
+  name = "github.com/go-redis/redis"
+  packages = [
+    ".",
+    "internal",
+    "internal/consistenthash",
+    "internal/hashtag",
+    "internal/pool",
+    "internal/proto",
+    "internal/singleflight",
+    "internal/util",
+  ]
+  pruneopts = "UT"
+  revision = "480db94d33e6088e08d628833b6c0705451d24bb"
+  version = "v6.13.2"
+
+[[projects]]
   digest = "1:c4a2528ccbcabf90f9f3c464a5fc9e302d592861bbfd0b7135a7de8a943d0406"
   name = "github.com/go-stack/stack"
   packages = ["."]
@@ -186,6 +203,7 @@
   input-imports = [
     "github.com/KavenC/cobra",
     "github.com/bwmarrin/discordgo",
+    "github.com/go-redis/redis",
     "github.com/line/line-bot-sdk-go/linebot",
     "github.com/mongodb/mongo-go-driver/mongo",
     "github.com/sirupsen/logrus",

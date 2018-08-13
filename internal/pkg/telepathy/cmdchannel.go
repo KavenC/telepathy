@@ -2,6 +2,7 @@ package telepathy
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/KavenC/cobra"
@@ -48,13 +49,13 @@ func init() {
 	}
 
 	cmd.AddCommand(&cobra.Command{
-		Use:   "2way",
+		Use:   "fwd2way",
 		Short: "Create two-way channel forwarding (DM only)",
 		Run:   cmdChannelTwoWay,
 	})
 
 	cmd.AddCommand(&cobra.Command{
-		Use:   "1way",
+		Use:   "fwd1way",
 		Short: "Create one-way channel forwarding (DM only)",
 		Run:   cmdChannelOneWay,
 	})
@@ -65,6 +66,18 @@ func init() {
 		Short:   "Used for identify channels various channel features.",
 		Args:    cobra.ExactArgs(1),
 		Run:     cmdChannelSet,
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "name",
+		Short: "Show the name of current channel.",
+		Run:   cmdChannelName,
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "fwdinfo",
+		Short: "Show message forwarding info (form/to).",
+		Run:   cmdChannelFwdInfo,
 	})
 
 	RegisterCommand(cmd)
@@ -140,17 +153,48 @@ func initChCmdSession(session *ChCmdSession) (string, string, error) {
 	return firstKey, secondKey, nil
 }
 
-func cmdChannelSetupFwd(cmd *cobra.Command, session *ChCmdSession) {
+func cmdChannelFwdInfo(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs := CommandParseExtraArgs(
+		logrus.WithField("command", args),
+		extras...)
+
+	fwd := GetForwarding()
+	toChList := fwd.GetForwardingTo(extraArgs.Message.FromChannel)
+	if toChList != nil {
+		cmd.Print("= Messages are forwarding to:")
+		for toCh := range toChList {
+			cmd.Printf("\n%s", toCh.GetName())
+		}
+	}
+
+	fromChList := fwd.GetForwardingFrom(extraArgs.Message.FromChannel)
+	if fromChList != nil {
+		cmd.Print("\n\n= Receiving forwarded messages from:")
+		for fromCh := range fromChList {
+			cmd.Printf("\n%s", fromCh.GetName())
+		}
+	}
+}
+
+func cmdChannelName(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs := CommandParseExtraArgs(
+		logrus.WithField("command", args),
+		extras...)
+
+	cmd.Print(extraArgs.Message.FromChannel.GetName())
+}
+
+func setupFwd(cmd *cobra.Command, session *ChCmdSession) {
 	key1, key2, err := initChCmdSession(session)
 	prefix := CommandGetPrefix()
 
 	if err != nil {
 		cmd.Print(err)
 	} else {
-		cmd.Print(`Setup two-way channel forwarding in 3 steps:
+		cmd.Print(`
 1. Make sure Teruhashi is in both channels.
-2. Send "` + prefix + " channel set " + key1 + `" to the first channel. (Withouth ").
-3. Send "` + prefix + " channel set " + key2 + `" to the second channel. (Withouth ").`)
+2. Send "` + prefix + " channel set " + key1 + `" to the first channel. (Without: ").
+3. Send "` + prefix + " channel set " + key2 + `" to the second channel. (Without: ").`)
 	}
 }
 
@@ -170,7 +214,8 @@ func cmdChannelTwoWay(cmd *cobra.Command, args []string, extras ...interface{}) 
 		Cmd:       chCmdTwoWayFwd,
 	}
 
-	cmdChannelSetupFwd(cmd, &cmdSession)
+	cmd.Print("Setup two-way channel forwarding in following steps:")
+	setupFwd(cmd, &cmdSession)
 }
 
 func cmdChannelOneWay(cmd *cobra.Command, args []string, extras ...interface{}) {
@@ -189,7 +234,28 @@ func cmdChannelOneWay(cmd *cobra.Command, args []string, extras ...interface{}) 
 		Cmd:       chCmdOneWayFwd,
 	}
 
-	cmdChannelSetupFwd(cmd, &cmdSession)
+	cmd.Print("Setup one-way channel forwarding in following steps:")
+	setupFwd(cmd, &cmdSession)
+}
+
+func cmdChannelCreateFwd(from *Channel, to *Channel, cmd *cobra.Command) {
+	fwd := GetForwarding()
+	ok := fwd.CreateForwarding(*from, *to)
+	if !ok {
+		cmd.Printf("Forwarding from %s to %s already exists.\n",
+			from.GetName(), to.GetName())
+	} else {
+		msgr, _ := GetMessenger(from.MessengerID)
+		msgr.send(&OutboundMessage{
+			TargetID: from.ChannelID,
+			Text:     fmt.Sprintf("Start forwarding messages to: %s", to.GetName()),
+		})
+		msgr, _ = GetMessenger(to.MessengerID)
+		msgr.send(&OutboundMessage{
+			TargetID: to.ChannelID,
+			Text:     fmt.Sprintf("Receiving forwarded messages from: %s", from.GetName()),
+		})
+	}
 }
 
 func cmdChannelSet(cmd *cobra.Command, args []string, extras ...interface{}) {
@@ -197,8 +263,8 @@ func cmdChannelSet(cmd *cobra.Command, args []string, extras ...interface{}) {
 		logrus.WithField("command", args),
 		extras...)
 
-	msg := extraArgs.Message.Messenger.name()
-	channelID := extraArgs.Message.SourceID
+	msg := extraArgs.Message.FromChannel.MessengerID
+	channelID := extraArgs.Message.FromChannel.ChannelID
 	key := args[0]
 
 	client := getRedis()
@@ -209,9 +275,8 @@ func cmdChannelSet(cmd *cobra.Command, args []string, extras ...interface{}) {
 		if err == redis.Nil {
 			cmd.Print("Invalid key, or key time out. Please restart setup process.")
 			return
-		} else {
-			logrus.Panic(err)
 		}
+		logrus.Panic(err)
 	}
 
 	chind := ChCmdInd{}
@@ -228,9 +293,8 @@ func cmdChannelSet(cmd *cobra.Command, args []string, extras ...interface{}) {
 		if err == redis.Nil {
 			cmd.Print("Invalid key, or key time out. Please restart setup process.")
 			return
-		} else {
-			logrus.Panic(err)
 		}
+		logrus.Panic(err)
 	}
 
 	err = json.Unmarshal([]byte(cmdstr), &chsession)
@@ -241,10 +305,22 @@ func cmdChannelSet(cmd *cobra.Command, args []string, extras ...interface{}) {
 
 	switch ch := chind.ChannelInd; ch {
 	case chCmdFirstCh:
+		if chsession.SecondID == channelID && chsession.SecondType == msg {
+			cmd.Print("Cannot forward message to the same channel.\n")
+			cmd.Print("Please restart setup process.")
+			client.Del(chind.SessionKey)
+			return
+		}
 		chsession.FirstID = channelID
 		chsession.FirstType = msg
 		cmd.Print("Set as First Channel successfully.")
 	case chCmdSecondCh:
+		if chsession.FirstID == channelID && chsession.FirstType == msg {
+			cmd.Print("Cannot forward message to the same channel.\n")
+			cmd.Print("Please restart setup process.")
+			client.Del(chind.SessionKey)
+			return
+		}
 		chsession.SecondID = channelID
 		chsession.SecondType = msg
 		cmd.Print("Set as Second Channel successfully.")
@@ -268,20 +344,35 @@ func cmdChannelSet(cmd *cobra.Command, args []string, extras ...interface{}) {
 			logrus.Error(err)
 		}
 	} else {
-		cmd.Print("Cmd End.\n")
 		client.Del(chind.SessionKey)
-
+		fch := &Channel{
+			MessengerID: chsession.FirstType,
+			ChannelID:   chsession.FirstID,
+		}
+		sch := &Channel{
+			MessengerID: chsession.SecondType,
+			ChannelID:   chsession.SecondID,
+		}
 		switch chCmd := chsession.Cmd; chCmd {
 		case chCmdOneWayFwd:
-			cmd.Print("One way fowarding.\n")
-			cmd.Printf("%v-%v -> %v-%v",
-				chsession.FirstType, chsession.FirstID,
-				chsession.SecondType, chsession.SecondID)
+			logrus.WithFields(logrus.Fields{
+				"command":        cmd.CommandPath(),
+				"first_type":     chsession.FirstType,
+				"first_channel":  chsession.FirstID,
+				"second_type":    chsession.SecondType,
+				"second_channel": chsession.SecondID,
+			}).Info("Creating one-way forwarding")
+			cmdChannelCreateFwd(fch, sch, cmd)
 		case chCmdTwoWayFwd:
-			cmd.Print("Two way fowarding.\n")
-			cmd.Printf("%v-%v <-> %v-%v",
-				chsession.FirstType, chsession.FirstID,
-				chsession.SecondType, chsession.SecondID)
+			logrus.WithFields(logrus.Fields{
+				"command":        cmd.CommandPath(),
+				"first_type":     chsession.FirstType,
+				"first_channel":  chsession.FirstID,
+				"second_type":    chsession.SecondType,
+				"second_channel": chsession.SecondID,
+			}).Info("Creating two-way forwarding")
+			cmdChannelCreateFwd(fch, sch, cmd)
+			cmdChannelCreateFwd(sch, fch, cmd)
 		default:
 			cmd.Print("Internal Error. Please restart setup process.")
 			logrus.Error("Got invalid Cmd in ChCmdSession.")

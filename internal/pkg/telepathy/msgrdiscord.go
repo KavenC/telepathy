@@ -62,13 +62,15 @@ func (m *DiscordMessenger) handler(_ *discordgo.Session, dgmessage *discordgo.Me
 	}
 
 	message := InboundMessage{
-		Messenger: m,
+		FromChannel: Channel{
+			MessengerID: m.name(),
+			ChannelID:   dgmessage.ChannelID,
+		},
 		SourceProfile: &MsgrUserProfile{
 			ID:          dgmessage.Author.ID,
 			DisplayName: dgmessage.Author.Username,
 		},
-		SourceID: dgmessage.ChannelID,
-		Text:     dgmessage.Content,
+		Text: dgmessage.Content,
 	}
 
 	channel, err := m.bot.Channel(dgmessage.ChannelID)

@@ -2,10 +2,18 @@ package telepathy
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/sirupsen/logrus"
 )
+
+// Channel is an abstract type for a communication session of a messenger APP
+type Channel struct {
+	MessengerID string
+	ChannelID   string
+}
 
 // MsgrUserProfile holds the information of a messenger user
 type MsgrUserProfile struct {
@@ -15,9 +23,8 @@ type MsgrUserProfile struct {
 
 // InboundMessage models a message send to Telepthy bot
 type InboundMessage struct {
-	Messenger       Messenger
+	FromChannel     Channel
 	SourceProfile   *MsgrUserProfile
-	SourceID        string
 	Text            string
 	IsDirectMessage bool
 }
@@ -53,6 +60,34 @@ func RegisterMessenger(messenger Messenger) {
 	messengerList[messenger.name()] = messenger
 }
 
+// GetMessenger gets a registered messenger handler with ID
+func GetMessenger(ID string) (Messenger, error) {
+	msg := messengerList[ID]
+	if msg == nil {
+		return nil, errors.New("Invalid Messenger ID: " + ID)
+	}
+	return msg, nil
+}
+
+func msgrHandleForwarding(ctx context.Context, message *InboundMessage) {
+	fwd := GetForwarding()
+	toChList := fwd.GetForwardingTo(message.FromChannel)
+	if toChList != nil {
+		text := fmt.Sprintf("[%s] %s:\n%s",
+			message.FromChannel.MessengerID,
+			message.SourceProfile.DisplayName,
+			message.Text)
+		for toCh := range toChList {
+			outMsg := &OutboundMessage{
+				TargetID: toCh.ChannelID,
+				Text:     text,
+			}
+			msgr, _ := GetMessenger(toCh.MessengerID)
+			msgr.send(outMsg)
+		}
+	}
+}
+
 // HandleInboundMessage handles incoming message from messengers
 func HandleInboundMessage(ctx context.Context, message *InboundMessage) {
 	if isCmdMsg(message.Text) {
@@ -60,8 +95,8 @@ func HandleInboundMessage(ctx context.Context, message *InboundMessage) {
 		// Parse it with command interface
 		args := getCmdFromMsg(message.Text)
 		logger := logrus.WithFields(logrus.Fields{
-			"messenger": message.Messenger.name(),
-			"source":    message.SourceID,
+			"messenger": message.FromChannel.MessengerID,
+			"source":    message.FromChannel.ChannelID,
 			"args":      args})
 		logger.Info("Got command message.")
 
@@ -72,13 +107,25 @@ func HandleInboundMessage(ctx context.Context, message *InboundMessage) {
 
 		// If there is some stirng output, forward it back to user
 		if buffer.Len() > 0 {
-			replyMsg := &OutboundMessage{TargetID: message.SourceID, Text: buffer.String()}
+			replyMsg := &OutboundMessage{
+				TargetID: message.FromChannel.ChannelID,
+				Text:     buffer.String(),
+			}
 			logger = logrus.WithFields(logrus.Fields{
-				"messenger": message.Messenger.name(),
+				"messenger": message.FromChannel.MessengerID,
 				"target":    replyMsg.TargetID,
 			})
 			logger.Info("Send command reply")
-			message.Messenger.send(replyMsg)
+
+			msg, _ := GetMessenger(message.FromChannel.MessengerID)
+			msg.send(replyMsg)
 		}
+	} else {
+		msgrHandleForwarding(ctx, message)
 	}
+}
+
+// GetName returns a formated name of a Channel object
+func (ch *Channel) GetName() string {
+	return fmt.Sprintf("%s(%s)", ch.MessengerID, ch.ChannelID)
 }

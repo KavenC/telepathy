@@ -4,19 +4,20 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/line/line-bot-sdk-go/linebot"
 	"github.com/sirupsen/logrus"
 )
 
 func init() {
-	RegisterMessenger(&LineMessenger{replyTokenMap: make(map[string]string)})
+	RegisterMessenger(&LineMessenger{replyTokenMap: sync.Map{}})
 }
 
 // LineMessenger implements the communication with Line APP
 type LineMessenger struct {
 	bot           *linebot.Client
-	replyTokenMap map[string]string
+	replyTokenMap sync.Map
 	ctx           context.Context
 }
 
@@ -61,10 +62,16 @@ func (m *LineMessenger) handler(response http.ResponseWriter, request *http.Requ
 
 	for _, event := range events {
 		if event.Type == linebot.EventTypeMessage {
-			message := InboundMessage{Messenger: m}
-			message.SourceProfile, message.SourceID = m.getSourceProfile(event.Source)
-			message.IsDirectMessage = message.SourceProfile.ID == message.SourceID
-			m.replyTokenMap[message.SourceID] = event.ReplyToken
+			message := InboundMessage{FromChannel: Channel{
+				MessengerID: m.name(),
+			}}
+			profile, channelID := m.getSourceProfile(event.Source)
+			message.SourceProfile = profile
+			message.FromChannel.ChannelID = channelID
+			message.IsDirectMessage = message.SourceProfile.ID == channelID
+			item, _ := m.replyTokenMap.LoadOrStore(channelID, &sync.Pool{})
+			pool, _ := item.(*sync.Pool)
+			pool.Put(event.ReplyToken)
 			switch lineMessage := event.Message.(type) {
 			case *linebot.TextMessage:
 				// Parse Command
@@ -111,29 +118,37 @@ func (m *LineMessenger) getSourceProfile(source *linebot.EventSource) (*MsgrUser
 }
 
 func (m *LineMessenger) send(message *OutboundMessage) {
-	replyToken, ok := m.replyTokenMap[message.TargetID]
+	// Try to use reply token
+	item, _ := m.replyTokenMap.LoadOrStore(message.TargetID, &sync.Pool{})
+	pool, _ := item.(*sync.Pool)
+	item = pool.Get()
 	lineMessage := linebot.NewTextMessage(message.Text)
-	if ok {
-		delete(m.replyTokenMap, message.TargetID)
-		call := m.bot.ReplyMessage(replyToken, lineMessage)
+	if item != nil {
+		replyTokenStr, _ := item.(string)
+		call := m.bot.ReplyMessage(replyTokenStr, lineMessage)
 		_, err := call.Do()
-		if err != nil {
-			logger := logrus.WithFields(logrus.Fields{
-				"messenger":   m.name(),
-				"target":      message.TargetID,
-				"reply_token": replyToken,
-			})
-			logger.Error("Send message fail.")
+
+		if err == nil {
+			return
 		}
-	} else {
-		call := m.bot.PushMessage(message.TargetID, lineMessage)
-		_, err := call.Do()
-		if err != nil {
-			logger := logrus.WithFields(logrus.Fields{
-				"messenger": m.name(),
-				"target":    message.TargetID,
-			})
-			logger.Error("Send message fail.")
-		}
+
+		// If send failed with replyToken, output err msg and retry with PushMessage
+		logger := logrus.WithFields(logrus.Fields{
+			"messenger":   m.name(),
+			"target":      message.TargetID,
+			"reply_token": replyTokenStr,
+		})
+		logger.Warn("Reply message fail.")
 	}
+
+	call := m.bot.PushMessage(message.TargetID, lineMessage)
+	_, err := call.Do()
+	if err != nil {
+		logger := logrus.WithFields(logrus.Fields{
+			"messenger": m.name(),
+			"target":    message.TargetID,
+		})
+		logger.Error("Push message fail.")
+	}
+
 }

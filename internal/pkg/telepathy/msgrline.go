@@ -111,9 +111,10 @@ func (m *LineMessenger) getSourceProfile(source *linebot.EventSource) (*MsgrUser
 }
 
 func (m *LineMessenger) send(message *OutboundMessage) {
-	replyToken := m.replyTokenMap[message.TargetID]
+	replyToken, ok := m.replyTokenMap[message.TargetID]
 	lineMessage := linebot.NewTextMessage(message.Text)
-	if replyToken != "" {
+	if ok {
+		delete(m.replyTokenMap, message.TargetID)
 		call := m.bot.ReplyMessage(replyToken, lineMessage)
 		_, err := call.Do()
 		if err != nil {

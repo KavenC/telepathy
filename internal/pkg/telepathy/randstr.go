@@ -16,7 +16,8 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-func getRandStr(length int) string {
+// RandStr randomly generate a string with specified length
+func RandStr(length int) string {
 	b := make([]byte, length)
 	for currentByte, randbits, randbitsRemain := length-1, rand.Int63(), seedSegmentMax; currentByte >= 0; {
 		if randbitsRemain == 0 {

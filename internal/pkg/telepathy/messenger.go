@@ -2,18 +2,9 @@ package telepathy
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"strings"
 
 	"github.com/sirupsen/logrus"
 )
-
-// Channel is an abstract type for a communication session of a messenger APP
-type Channel struct {
-	MessengerID string
-	ChannelID   string
-}
 
 // MsgrUserProfile holds the information of a messenger user
 type MsgrUserProfile struct {
@@ -35,97 +26,129 @@ type OutboundMessage struct {
 	Text     string
 }
 
-// Messenger defines the interface of a messenger handler
-type Messenger interface {
-	name() string
-	init() error
-	start(context.Context)
-	send(*OutboundMessage)
+// GlobalMessenger defines global interfaces of a messenger handler
+// These interfaces will be opened to external modules such as other Messenger handlers
+type GlobalMessenger interface {
+	Name() string
+	Send(*OutboundMessage)
 }
 
-var messengerList map[string]Messenger
+// Messenger defines the interface of a messenger handler
+// Theses interfaces are accessed only by Telepathy framework
+type Messenger interface {
+	Start(context.Context)
+	GlobalMessenger
+}
+
+// MessengerManager manages messenger modules
+type MessengerManager struct {
+	messengers map[string]Messenger
+	session    *Session
+}
+
+// MessengerExistsError indicates registering Messenger with a name that already exists in the list
+type MessengerExistsError struct {
+	Name string
+}
+
+// MessengerInvalidError indicates requesting a non-registered Messenger name
+type MessengerInvalidError struct {
+	Name string
+}
+
+// MsgrCtorParam is the parameter for MessengerCtor
+// This is used to pass framework information to Messenger modules
+type MsgrCtorParam struct {
+	Session    *Session
+	MsgHandler InboundMsgHandler
+	Logger     *logrus.Entry
+}
+
+// InboundMsgHandler defines the signature of unified inbound message handler
+// Every Messenger implementation should call this function for all received messages
+type InboundMsgHandler func(context.Context, *Session, InboundMessage)
+
+// MessengerCtor defines the signature of Messenger module constructor
+// Messenger implementation need to register the constructor to the Telepathy framework
+type MessengerCtor func(*MsgrCtorParam) (Messenger, error)
+
+var msgrCtors map[string]MessengerCtor
+var msgHandler []InboundMsgHandler
+
+func (e MessengerExistsError) Error() string {
+	return "Messenger: " + e.Name + " has already been registered"
+}
+
+func (e MessengerInvalidError) Error() string {
+	return "Messenger: " + e.Name + " does not exist"
+}
 
 // RegisterMessenger registers a Messenger handler
-func RegisterMessenger(messenger Messenger) {
-	logger := logrus.WithField("messenger", messenger.name())
-	logger.Info("Registering Messenger.")
-	if messengerList == nil {
-		messengerList = make(map[string]Messenger)
+func RegisterMessenger(ID string, ctor MessengerCtor) error {
+	logger := logrus.WithField("messenger", ID)
+	logger.Info("Registering Messenger")
+	if msgrCtors == nil {
+		msgrCtors = make(map[string]MessengerCtor)
 	}
 
-	if messengerList[messenger.name()] != nil {
-		panic("Messenger: " + messenger.name() + " already exists.")
+	if msgrCtors[ID] != nil {
+		return MessengerExistsError{Name: ID}
 	}
 
-	messengerList[messenger.name()] = messenger
+	msgrCtors[ID] = ctor
+	return nil
 }
 
-// GetMessenger gets a registered messenger handler with ID
-func GetMessenger(ID string) (Messenger, error) {
-	msg := messengerList[ID]
+// RegisterMessageHandler register a InboundMsgHandler
+// The callback will be called when receiving messages from any Messenger
+func RegisterMessageHandler(handler InboundMsgHandler) {
+	msgHandler = append(msgHandler, handler)
+}
+
+func newMessengerManager(session *Session) *MessengerManager {
+	manager := MessengerManager{
+		messengers: make(map[string]Messenger),
+		session:    session,
+	}
+	param := MsgrCtorParam{
+		Session:    session,
+		MsgHandler: rootMsgHandler,
+	}
+	var err error
+
+	for ID, ctor := range msgrCtors {
+		param := param
+		param.Logger = logrus.WithField("messenger", ID)
+		manager.messengers[ID], err = ctor(&param)
+		if err != nil {
+			logger := logrus.WithField("module", "messenger")
+			logger.Error(err.Error())
+		}
+	}
+
+	return &manager
+}
+
+// Messenger gets a registered messenger handler with ID
+func (m *MessengerManager) Messenger(ID string) (GlobalMessenger, error) {
+	msg := m.messengers[ID]
 	if msg == nil {
-		return nil, errors.New("Invalid Messenger ID: " + ID)
+		return nil, MessengerInvalidError{Name: ID}
 	}
 	return msg, nil
 }
 
-func msgrHandleForwarding(ctx context.Context, message *InboundMessage) {
-	fwd := GetForwarding()
-	toChList := fwd.GetForwardingTo(message.FromChannel)
-	if toChList != nil {
-		text := fmt.Sprintf("[%s] %s:\n%s",
-			message.FromChannel.MessengerID,
-			message.SourceProfile.DisplayName,
-			message.Text)
-		for toCh := range toChList {
-			outMsg := &OutboundMessage{
-				TargetID: toCh.ChannelID,
-				Text:     text,
-			}
-			msgr, _ := GetMessenger(toCh.MessengerID)
-			msgr.send(outMsg)
-		}
-	}
-}
-
-// HandleInboundMessage handles incoming message from messengers
-func HandleInboundMessage(ctx context.Context, message *InboundMessage) {
+func rootMsgHandler(ctx context.Context, session *Session, message InboundMessage) {
 	if isCmdMsg(message.Text) {
-		// Got a command message
-		// Parse it with command interface
-		args := getCmdFromMsg(message.Text)
 		logger := logrus.WithFields(logrus.Fields{
 			"messenger": message.FromChannel.MessengerID,
 			"source":    message.FromChannel.ChannelID,
-			"args":      args})
-		logger.Info("Got command message.")
-
-		rootCmd.SetArgs(args)
-		var buffer strings.Builder
-		rootCmd.SetOutput(&buffer)
-		rootCmd.Execute(ctx, message)
-
-		// If there is some stirng output, forward it back to user
-		if buffer.Len() > 0 {
-			replyMsg := &OutboundMessage{
-				TargetID: message.FromChannel.ChannelID,
-				Text:     buffer.String(),
-			}
-			logger = logrus.WithFields(logrus.Fields{
-				"messenger": message.FromChannel.MessengerID,
-				"target":    replyMsg.TargetID,
-			})
-			logger.Info("Send command reply")
-
-			msg, _ := GetMessenger(message.FromChannel.MessengerID)
-			msg.send(replyMsg)
-		}
+			"text":      message.Text})
+		logger.Info("Got command message")
+		handleCmdMsg(ctx, session, &message)
 	} else {
-		msgrHandleForwarding(ctx, message)
+		for _, handler := range msgHandler {
+			handler(ctx, session, message)
+		}
 	}
-}
-
-// GetName returns a formated name of a Channel object
-func (ch *Channel) GetName() string {
-	return fmt.Sprintf("%s(%s)", ch.MessengerID, ch.ChannelID)
 }

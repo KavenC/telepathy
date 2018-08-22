@@ -10,10 +10,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var commandPrefix = "#tele#"
+// CommandPrefix is the trigger word for the Telepathy command message
+const CommandPrefix = "#tele#"
 
 var rootCmd = &cobra.Command{
-	Use: commandPrefix,
+	Use: CommandPrefix,
 	DisableFlagsInUseLine: true,
 	Run: func(*cobra.Command, []string, ...interface{}) {
 		// Do nothing
@@ -23,6 +24,7 @@ var rootCmd = &cobra.Command{
 // ExtraCmdArgs defines the extra arguments passed to Command.Run callbacks
 // All Command.Run callbacks must call ParseExtraCmdArgs to get these data
 type ExtraCmdArgs struct {
+	Session *Session
 	Ctx     context.Context
 	Message *InboundMessage
 }
@@ -72,17 +74,22 @@ func RegisterCommand(cmd *cobra.Command) error {
 
 // CommandParseExtraArgs parse extra command arguments for the Command.Run callbacks
 func CommandParseExtraArgs(logger *logrus.Entry, extras ...interface{}) *ExtraCmdArgs {
-	if len(extras) != 2 {
-		logger.Panic("Insufficient arguments in command handler.")
+	if len(extras) != 3 {
+		logger.Panic("Incorrect number of arguments in command handler.")
 	}
 
 	ctx, ctxok := extras[0].(context.Context)
-	message, msgok := extras[1].(*InboundMessage)
-	if !ctxok || !msgok {
-		logger.Panicf("Invalid argument type in command handler: %T, %T", extras[0], extras[1])
+	session, sesok := extras[1].(*Session)
+	message, msgok := extras[2].(*InboundMessage)
+	if !ctxok || !msgok || !sesok {
+		logger.Panicf("Invalid argument type in command handler: %T, %T, %T",
+			extras[0],
+			extras[1],
+			extras[2])
 	}
 
 	return &ExtraCmdArgs{
+		Session: session,
 		Ctx:     ctx,
 		Message: message,
 	}
@@ -98,15 +105,29 @@ func CommandEnsureDM(cmd *cobra.Command, extraArgs *ExtraCmdArgs) bool {
 	return true
 }
 
-// CommandGetPrefix returns the command prefix
-func CommandGetPrefix() string {
-	return commandPrefix
-}
-
 func isCmdMsg(text string) bool {
-	return strings.HasPrefix(text, commandPrefix+" ")
+	return strings.HasPrefix(text, CommandPrefix+" ")
 }
 
-func getCmdFromMsg(test string) []string {
-	return regexp.MustCompile(" +").Split(test, -1)[1:]
+func handleCmdMsg(ctx context.Context, session *Session, message *InboundMessage) {
+	// Got a command message
+	// Parse it with command interface
+	args := regexp.MustCompile(" +").Split(message.Text, -1)[1:]
+
+	rootCmd.SetArgs(args)
+	var buffer strings.Builder
+	rootCmd.SetOutput(&buffer)
+
+	// Execute command
+	rootCmd.Execute(ctx, session, message)
+
+	// If there is some stirng output, forward it back to user
+	if buffer.Len() > 0 {
+		replyMsg := &OutboundMessage{
+			TargetID: message.FromChannel.ChannelID,
+			Text:     buffer.String(),
+		}
+		msg, _ := session.Msgr.Messenger(message.FromChannel.MessengerID)
+		msg.Send(replyMsg)
+	}
 }

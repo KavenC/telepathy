@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -22,56 +23,70 @@ var _ = func() bool {
 
 // Session defines a Telepathy server session
 type Session struct {
-	Ctx          context.Context
-	DatabaseType string
+	ctx   context.Context
+	port  string
+	Redis *redisHandle
+	DB    *databaseHandler
+	Msgr  *MessengerManager
+	Resrc sync.Map
+}
+
+// SessionConfig defines the configurations of a Telepathy session
+type SessionConfig struct {
 	Port         string
+	RedisURL     string
+	MongoURL     string
+	DatabaseName string
+}
+
+// NewSession creates a new Telepathy session
+func NewSession(config SessionConfig) (*Session, error) {
+	session := Session{port: config.Port}
+	var err error
+
+	// Init redis
+	session.Redis, err = newRedisHandle(config.RedisURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// Init database
+	session.DB, err = newDatabaseHandler(config.MongoURL, config.DatabaseName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Init messenger
+	session.Msgr = newMessengerManager(&session)
+
+	return &session, nil
 }
 
 // Start starts a Telepathy session
 // The function always returns an error when the seesion is terminated
-func (s *Session) Start() error {
-	if s.Ctx == nil {
-		logrus.Panic("Session Ctx must not be nil")
+func (s *Session) Start(ctx context.Context) {
+	// Start redis
+	go s.Redis.start(ctx)
+
+	// Start database
+	go s.DB.start(ctx)
+
+	// Start messenger handlers
+	for _, messenger := range s.Msgr.messengers {
+		go messenger.Start(ctx)
 	}
 
-	// init cache
-	err := initRedis()
-	if err != nil {
-		logrus.Panic("Redis init failed.")
-	}
-
-	// Initializes database handler
-	err = initDatabase(s.DatabaseType)
-	if err != nil {
-		logrus.Panic("Database init failed.")
-	}
-
-	// Initializes messenger handlers
-	for _, messenger := range messengerList {
-		err := messenger.init()
-		if err != nil {
-			logger := logrus.WithField("messenger", messenger.name())
-			logger.Error("Init fail.")
-		}
-	}
-
-	ctx, cancel := context.WithCancel(s.Ctx)
-
-	// Starts messenger handlers
-	for _, messenger := range messengerList {
-		go messenger.start(ctx)
-	}
 	// Webhook stype messengers are handled together with a http server
-	server := http.Server{Addr: ":" + s.Port, Handler: getServeMux()}
+	logrus.Info("Start listening port: " + s.port)
+	server := http.Server{Addr: ":" + s.port, Handler: serveMux()}
 	go server.ListenAndServe()
 
 	// Wait here until the session is Done
-	<-s.Ctx.Done()
-	cancel()
+	<-ctx.Done()
 
 	timeout, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
 
-	return server.Shutdown(timeout)
-
+	// Shutdown Http server
+	server.Shutdown(timeout)
 }

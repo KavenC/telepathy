@@ -7,9 +7,23 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// HTTPHandler defines the callback function signature for Webhook handler
+type HTTPHandler func(http.ResponseWriter, *http.Request)
+
+// WebhookExistsError indicates a failure when registering Webhook
+// since the pattern is already registered
+type WebhookExistsError struct {
+	Pattern string
+}
+
+// WebhookInvalidError indicates a failure when registering Webhook
+// since the pattern does not comply naming rule
+type WebhookInvalidError struct {
+	Pattern string
+}
+
 var (
-	webhookList = []string{}
-	mux         http.ServeMux
+	webhookList = make(map[string]HTTPHandler)
 	validHook   = regexp.MustCompile(`^[A-Za-z]+(-[A-Za-z0-9]+){0,3}$`)
 )
 
@@ -17,22 +31,34 @@ var (
 // The pattern can only be in this regular expression format: ^[A-Za-z]+(-[A-Za-z0-9]+){0,3}$, otherwise it is ignored.
 // If the pattern is already registered, it panics.
 // Webhooks are always registered at (host)/webhook/<patter>
-func RegisterWebhook(pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	logrus.Info("Registering webhook pattern: " + pattern)
+func RegisterWebhook(pattern string, handler HTTPHandler) error {
+	logger := logrus.WithField("module", "httpserv")
+	logger.Info("Registering webhook pattern: " + pattern)
 
-	for _, value := range webhookList {
-		if value == pattern {
-			panic("RegisterWebhook is called twice with pattern: " + pattern)
-		}
+	if !validHook.MatchString(pattern) {
+		return WebhookInvalidError{Pattern: pattern}
 	}
 
-	if validHook.MatchString(pattern) {
-		mux.HandleFunc("/webhook/"+pattern, handler)
-	} else {
-		panic("Invalid webhook pattern: " + pattern)
+	if _, ok := webhookList[pattern]; ok {
+		return WebhookExistsError{Pattern: pattern}
 	}
+
+	webhookList[pattern] = handler
+	return nil
 }
 
-func getServeMux() *http.ServeMux {
+func serveMux() *http.ServeMux {
+	mux := http.ServeMux{}
+	for pattern, handler := range webhookList {
+		mux.HandleFunc("/webhook/"+pattern, handler)
+	}
 	return &mux
+}
+
+func (e WebhookExistsError) Error() string {
+	return "Pattern: " + e.Pattern + " is already registered"
+}
+
+func (e WebhookInvalidError) Error() string {
+	return "Pattern: " + e.Pattern + " is invalid"
 }

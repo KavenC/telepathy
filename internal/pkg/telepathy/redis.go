@@ -55,6 +55,7 @@ func (r *redisHandle) start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			r.logger.Info("context done. existing")
+			r.client.Close()
 		case request := <-r.reqQueue:
 			ret := request.Action(r.client.WithContext(ctx))
 			request.Return <- ret

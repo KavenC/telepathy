@@ -323,6 +323,10 @@ func info(cmd *cobra.Command, args []string, extras ...interface{}) {
 			cmd.Printf("\n%s", fromCh.Name())
 		}
 	}
+
+	if toChList == nil && fromChList == nil {
+		cmd.Print("This channel is not in any forwarding pairs.")
+	}
 }
 
 func createFwd(from, to, this *telepathy.Channel, s *telepathy.Session) string {
@@ -471,6 +475,7 @@ func setKeyProcess(key, cid, msg string, s *telepathy.Session) func(*redis.Clien
 				logger.Errorf("Got invalid Cmd in Session: %v", session)
 				return errUnknown
 			}
+			manager(s).writeToDB()
 		}
 		return ret
 	}

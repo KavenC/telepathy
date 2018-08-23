@@ -1,6 +1,7 @@
 package telepathy
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/KavenC/cobra"
@@ -42,4 +43,10 @@ func cmdChannelName(cmd *cobra.Command, args []string, extras ...interface{}) {
 // Name returns a formated name of a Channel object
 func (ch *Channel) Name() string {
 	return fmt.Sprintf("%s(%s)", ch.MessengerID, ch.ChannelID)
+}
+
+// JSON returns JSON representation of Channel
+func (ch *Channel) JSON() string {
+	str, _ := json.Marshal(ch)
+	return string(str)
 }

@@ -34,7 +34,7 @@ func newDatabaseHandler(mongourl string, dbname string) (*databaseHandler, error
 	if err != nil {
 		return nil, err
 	}
-
+	handler.reqQueue = make(chan *DatabaseRequest)
 	handler.logger = logrus.WithField("module", "database")
 
 	return &handler, nil
@@ -55,6 +55,10 @@ func (h *databaseHandler) start(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			h.logger.Info("context done. existing")
+			h.logger.Info("Disconnecting")
+			timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			h.client.Disconnect(timeoutCtx)
 			return nil
 		case request := <-h.reqQueue:
 			ret := request.Action(ctx, h.database)

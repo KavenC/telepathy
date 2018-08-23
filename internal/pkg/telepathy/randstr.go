@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const seeds = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"
+const seeds = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+="
 const (
 	seedBits       = 6
 	seedMask       = 1<<seedBits - 1

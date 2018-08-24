@@ -217,7 +217,10 @@ func msgHandler(ctx context.Context, t *telepathy.Session, message telepathy.Inb
 		for toCh := range toChList {
 			outMsg := &telepathy.OutboundMessage{
 				TargetID: toCh.ChannelID,
-				Text:     text,
+				Image:    message.Image,
+			}
+			if len(message.Text) != 0 {
+				outMsg.Text = text
 			}
 			msgr, _ := t.Msgr.Messenger(toCh.MessengerID)
 			msgr.Send(outMsg)

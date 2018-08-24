@@ -2,6 +2,7 @@ package line
 
 import (
 	"context"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"sync"
@@ -23,6 +24,7 @@ type messenger struct {
 	ctx           context.Context
 	bot           *linebot.Client
 	replyTokenMap sync.Map
+	logger        *logrus.Entry
 }
 
 func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
@@ -35,6 +37,7 @@ func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
 		return nil, err
 	}
 	msg.bot = bot
+	msg.logger = logrus.WithField("messenger", name)
 	telepathy.RegisterWebhook("line-callback", msg.handler)
 
 	return &msg, nil
@@ -71,6 +74,10 @@ func (m *messenger) handler(response http.ResponseWriter, request *http.Request)
 			}}
 			profile, channelID := m.getSourceProfile(event.Source)
 			message.SourceProfile = profile
+			if message.SourceProfile == nil {
+				m.Logger.Warn("Ignored message with unknown source")
+				continue
+			}
 			message.FromChannel.ChannelID = channelID
 			message.IsDirectMessage = message.SourceProfile.ID == channelID
 			item, _ := m.replyTokenMap.LoadOrStore(channelID, &sync.Pool{})
@@ -78,14 +85,31 @@ func (m *messenger) handler(response http.ResponseWriter, request *http.Request)
 			pool.Put(event.ReplyToken)
 			switch lineMessage := event.Message.(type) {
 			case *linebot.TextMessage:
-				// Parse Command
 				message.Text = lineMessage.Text
-				if message.SourceProfile == nil {
-					m.Logger.Warn("Ignored message with unknown source")
-				} else {
-					m.MsgHandler(m.ctx, m.MsgrCtorParam.Session, message)
+			case *linebot.StickerMessage:
+				message.Text = "(Sticker)"
+			case *linebot.ImageMessage:
+				response, err := m.bot.GetMessageContent(lineMessage.ID).Do()
+				if err != nil {
+					m.logger.Warn("fail to get image content")
+					continue
 				}
+				content, err := ioutil.ReadAll(response.Content)
+				response.Content.Close()
+				if err != nil {
+					m.logger.Warn("fail to read image content")
+					continue
+				}
+				m.logger.Info("got content, type=" + response.ContentType)
+				message.Image = telepathy.ByteContent{
+					Type:    response.ContentType,
+					Length:  response.ContentLength,
+					Content: &content,
+				}
+			default:
+				continue
 			}
+			m.MsgHandler(m.ctx, m.MsgrCtorParam.Session, message)
 		}
 	}
 }

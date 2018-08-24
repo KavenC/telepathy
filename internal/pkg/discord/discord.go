@@ -77,6 +77,7 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 		m.bot.ChannelMessageSendComplex(
 			message.TargetID,
 			&discordgo.MessageSend{
+				Content: message.Text,
 				File: &discordgo.File{
 					Name:        "sent-from-telepathy.png", // always use png, just to make discord show the image
 					ContentType: message.Image.Type,
@@ -84,10 +85,10 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 				},
 			},
 		)
-	}
-
-	if len(message.Text) > 0 {
-		m.bot.ChannelMessageSend(message.TargetID, message.Text)
+	} else {
+		if len(message.Text) > 0 {
+			m.bot.ChannelMessageSend(message.TargetID, message.Text)
+		}
 	}
 }
 

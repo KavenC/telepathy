@@ -210,7 +210,7 @@ func msgHandler(ctx context.Context, t *telepathy.Session, message telepathy.Inb
 	manager := manager(t)
 	toChList := manager.forwardingTo(message.FromChannel)
 	if toChList != nil {
-		text := fmt.Sprintf("[%s] %s:\n%s",
+		text := fmt.Sprintf("**[ %s | %s ]**\n%s",
 			message.FromChannel.MessengerID,
 			message.SourceProfile.DisplayName,
 			message.Text)
@@ -219,7 +219,7 @@ func msgHandler(ctx context.Context, t *telepathy.Session, message telepathy.Inb
 				TargetID: toCh.ChannelID,
 				Image:    message.Image,
 			}
-			if len(message.Text) != 0 {
+			if len(message.Text) != 0 || message.Image.Length != 0 {
 				outMsg.Text = text
 			}
 			msgr, _ := t.Msgr.Messenger(toCh.MessengerID)

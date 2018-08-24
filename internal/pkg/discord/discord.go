@@ -38,6 +38,7 @@ func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
 	var err error
 	msgr.bot, err = discordgo.New("Bot " + os.Getenv("DISCORD_BOT_TOKEN"))
 	if err != nil {
+		msgr.Logger.Errorf("init failed: %s", err.Error())
 		return nil, InitError{msg: err.Error()}
 	}
 
@@ -53,7 +54,7 @@ func (m *messenger) Start(ctx context.Context) {
 	// Open a websocket connection to Discord and begin listening.
 	err := m.bot.Open()
 	if err != nil {
-		m.Logger.Error("Open websocket connection fail.")
+		m.Logger.Errorf("open websocket connection failed: %s", err.Error())
 		return
 	}
 
@@ -62,9 +63,13 @@ func (m *messenger) Start(ctx context.Context) {
 	// Run until being cancelled
 	<-ctx.Done()
 
-	m.Logger.Info("Terminating.")
+	m.Logger.Info("terminating")
 	// Cleanly close down the Discord session.
-	m.bot.Close()
+	err = m.bot.Close()
+
+	if err != nil {
+		m.Logger.Errorf("error when closing: %s", err.Error())
+	}
 }
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {
@@ -72,6 +77,7 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 		m.bot.ChannelMessageSendComplex(
 			message.TargetID,
 			&discordgo.MessageSend{
+				Content: message.Text,
 				File: &discordgo.File{
 					Name:        "sent-from-telepathy.png", // always use png, just to make discord show the image
 					ContentType: message.Image.Type,
@@ -79,10 +85,10 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 				},
 			},
 		)
-	}
-
-	if len(message.Text) > 0 {
-		m.bot.ChannelMessageSend(message.TargetID, message.Text)
+	} else {
+		if len(message.Text) > 0 {
+			m.bot.ChannelMessageSend(message.TargetID, message.Text)
+		}
 	}
 }
 
@@ -106,7 +112,7 @@ func (m *messenger) handler(_ *discordgo.Session, dgmessage *discordgo.MessageCr
 
 	channel, err := m.bot.Channel(dgmessage.ChannelID)
 	if err != nil {
-		m.Logger.Error("Get channel fail: " + err.Error())
+		m.Logger.Error("get channel fail: " + err.Error())
 	}
 	message.IsDirectMessage = channel.Type == discordgo.ChannelTypeDM
 

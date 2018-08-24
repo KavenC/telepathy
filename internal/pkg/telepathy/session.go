@@ -3,23 +3,11 @@ package telepathy
 import (
 	"context"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
-
-var _ = func() bool {
-	_, production := os.LookupEnv("TELEPATHY_PRODUCTION")
-	if !production {
-		logrus.SetFormatter(&logrus.TextFormatter{DisableColors: true})
-		logrus.Info("== Telepathy Starts in DEVELOPMENT Mode ==")
-	} else {
-		logrus.Info("== Telepathy Starts in PRODUCTION Mode ==")
-	}
-	return true
-}()
 
 // Session defines a Telepathy server session
 type Session struct {
@@ -65,6 +53,7 @@ func NewSession(config SessionConfig) (*Session, error) {
 // Start starts a Telepathy session
 // The function always returns an error when the seesion is terminated
 func (s *Session) Start(ctx context.Context) {
+	logrus.Info("session start")
 	// Start redis
 	go s.Redis.start(ctx)
 
@@ -77,16 +66,22 @@ func (s *Session) Start(ctx context.Context) {
 	}
 
 	// Webhook stype messengers are handled together with a http server
-	logrus.Info("Start listening port: " + s.port)
+	logrus.WithField("module", "session").Info("start listening port: " + s.port)
 	server := http.Server{Addr: ":" + s.port, Handler: serveMux()}
 	go server.ListenAndServe()
 
 	// Wait here until the session is Done
 	<-ctx.Done()
-
-	timeout, stop := context.WithTimeout(context.Background(), 5*time.Second)
-	defer stop()
+	logrus.WithField("module", "session").Info("stopping")
 
 	// Shutdown Http server
-	server.Shutdown(timeout)
+	timeout, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	err := server.Shutdown(timeout)
+	stop()
+	if err != nil {
+		logrus.Errorf("failed to shutdown httpserver: %s", err.Error())
+	} else {
+		logrus.Info("httpserver shutdown")
+	}
+	logrus.Info("session closed")
 }

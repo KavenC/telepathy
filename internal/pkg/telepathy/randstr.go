@@ -29,6 +29,5 @@ func RandStr(length int) string {
 		randbits >>= seedBits
 		randbitsRemain--
 	}
-
 	return string(b)
 }

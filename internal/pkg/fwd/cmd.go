@@ -252,7 +252,7 @@ func initSession(ctx context.Context, session *Session, t *telepathy.Session) (s
 	return redisRet.keys[1], redisRet.keys[2], nil
 }
 
-func setupFwd(cmd *cobra.Command, session *Session, extraArgs *telepathy.ExtraCmdArgs) {
+func setupFwd(cmd *cobra.Command, session *Session, extraArgs *telepathy.CmdExtraArgs) {
 	key1, key2, err := initSession(extraArgs.Ctx, session, extraArgs.Session)
 	prefix := telepathy.CommandPrefix
 
@@ -267,9 +267,7 @@ func setupFwd(cmd *cobra.Command, session *Session, extraArgs *telepathy.ExtraCm
 }
 
 func createTwoWay(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.CommandParseExtraArgs(
-		logrus.WithField("command", cmd.CommandPath),
-		extras...)
+	extraArgs := telepathy.NewCmdExtraArgs(extras...)
 
 	if !telepathy.CommandEnsureDM(cmd, extraArgs) {
 		return
@@ -285,9 +283,7 @@ func createTwoWay(cmd *cobra.Command, args []string, extras ...interface{}) {
 }
 
 func createOneWay(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.CommandParseExtraArgs(
-		logrus.WithField("command", cmd.CommandPath),
-		extras...)
+	extraArgs := telepathy.NewCmdExtraArgs(extras...)
 
 	if !telepathy.CommandEnsureDM(cmd, extraArgs) {
 		return
@@ -303,9 +299,7 @@ func createOneWay(cmd *cobra.Command, args []string, extras ...interface{}) {
 }
 
 func info(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.CommandParseExtraArgs(
-		logrus.WithField("command", args),
-		extras...)
+	extraArgs := telepathy.NewCmdExtraArgs(extras...)
 
 	manager := manager(extraArgs.Session)
 	toChList := manager.forwardingTo(extraArgs.Message.FromChannel)
@@ -482,9 +476,7 @@ func setKeyProcess(key, cid, msg string, s *telepathy.Session) func(*redis.Clien
 }
 
 func set(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.CommandParseExtraArgs(
-		logrus.WithField("command", args),
-		extras...)
+	extraArgs := telepathy.NewCmdExtraArgs(extras...)
 
 	msg := extraArgs.Message.FromChannel.MessengerID
 	cid := extraArgs.Message.FromChannel.ChannelID

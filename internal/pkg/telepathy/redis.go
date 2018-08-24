@@ -23,39 +23,48 @@ type redisHandle struct {
 }
 
 func newRedisHandle(redisurl string) (*redisHandle, error) {
+	logger := logrus.WithField("module", "redis")
 	handle := redisHandle{}
 	options, err := redis.ParseURL(redisurl)
 	if err != nil {
+		logger.Error("failed to parse reids url")
 		return nil, err
 	}
 
 	handle.client = redis.NewClient(options)
-	_, err = handle.client.Ping().Result()
-	if err != nil {
-		return nil, err
-	}
-
-	// Flush all
-	err = handle.client.FlushAll().Err()
-	if err != nil {
-		return nil, err
-	}
 
 	// TODO: define queue length
 	handle.reqQueue = make(chan *RedisRequest)
 
-	handle.logger = logrus.WithField("module", "redis")
+	handle.logger = logger
 
+	logger.Info("created redis handler")
 	return &handle, nil
 }
 
 func (r *redisHandle) start(ctx context.Context) {
-	r.logger.Info("started")
+	r.logger.Info("starting")
+	if err := r.client.Ping().Err(); err != nil {
+		r.logger.Errorf("ping failed: %s", err.Error())
+		return
+	}
+
+	if err := r.client.FlushAll().Err(); err != nil {
+		r.logger.Errorf("failed to flush all:: %s", err.Error())
+	}
+
+	r.logger.Info("waiting for request")
 	for {
 		select {
 		case <-ctx.Done():
-			r.logger.Info("context done. existing")
-			r.client.Close()
+			r.logger.Info("terminated")
+			err := r.client.Close()
+			if err != nil {
+				r.logger.Errorf("failed to close connection: %s", err.Error())
+			} else {
+				r.logger.Info("connection closed")
+			}
+			return
 		case request := <-r.reqQueue:
 			ret := request.Action(r.client.WithContext(ctx))
 			request.Return <- ret

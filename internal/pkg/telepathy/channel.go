@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/KavenC/cobra"
-	"github.com/sirupsen/logrus"
 )
 
 // Channel is an abstract type for a communication session of a messenger APP
@@ -33,16 +32,13 @@ func init() {
 }
 
 func cmdChannelName(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := CommandParseExtraArgs(
-		logrus.WithField("command", cmd.CommandPath),
-		extras...)
-
+	extraArgs := NewCmdExtraArgs(extras...)
 	cmd.Print(extraArgs.Message.FromChannel.Name())
 }
 
 // Name returns a formated name of a Channel object
 func (ch *Channel) Name() string {
-	return fmt.Sprintf("%s(%s)", ch.MessengerID, ch.ChannelID)
+	return fmt.Sprintf("%s: %s", ch.MessengerID, ch.ChannelID)
 }
 
 // JSON returns JSON representation of Channel

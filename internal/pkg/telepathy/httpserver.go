@@ -33,17 +33,19 @@ var (
 // Webhooks are always registered at (host)/webhook/<patter>
 func RegisterWebhook(pattern string, handler HTTPHandler) error {
 	logger := logrus.WithField("module", "httpserv")
-	logger.Info("Registering webhook pattern: " + pattern)
 
 	if !validHook.MatchString(pattern) {
+		logger.WithField("webhook", pattern).Error("illegal webhook name")
 		return WebhookInvalidError{Pattern: pattern}
 	}
 
 	if _, ok := webhookList[pattern]; ok {
+		logger.WithField("webhook", pattern).Error("registered multiple times")
 		return WebhookExistsError{Pattern: pattern}
 	}
 
 	webhookList[pattern] = handler
+	logger.WithField("webhook", pattern).Info("registered")
 	return nil
 }
 

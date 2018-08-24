@@ -24,7 +24,6 @@ type messenger struct {
 	ctx           context.Context
 	bot           *linebot.Client
 	replyTokenMap sync.Map
-	logger        *logrus.Entry
 }
 
 func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
@@ -37,7 +36,6 @@ func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
 		return nil, err
 	}
 	msg.bot = bot
-	msg.logger = logrus.WithField("messenger", name)
 	telepathy.RegisterWebhook("line-callback", msg.handler)
 
 	return &msg, nil
@@ -53,12 +51,13 @@ func (m *messenger) Start(ctx context.Context) {
 
 func (m *messenger) handler(response http.ResponseWriter, request *http.Request) {
 	if m.ctx == nil {
-		m.Logger.Warn("Dropped event")
+		m.Logger.Warn("event dropped")
 		return
 	}
 
 	events, err := m.bot.ParseRequest(request)
 	if err != nil {
+		m.Logger.Errorf("invalid request: %s", err.Error())
 		if err == linebot.ErrInvalidSignature {
 			response.WriteHeader(400)
 		} else {
@@ -75,7 +74,7 @@ func (m *messenger) handler(response http.ResponseWriter, request *http.Request)
 			profile, channelID := m.getSourceProfile(event.Source)
 			message.SourceProfile = profile
 			if message.SourceProfile == nil {
-				m.Logger.Warn("Ignored message with unknown source")
+				m.Logger.Warn("ignored message with unknown source")
 				continue
 			}
 			message.FromChannel.ChannelID = channelID
@@ -91,16 +90,15 @@ func (m *messenger) handler(response http.ResponseWriter, request *http.Request)
 			case *linebot.ImageMessage:
 				response, err := m.bot.GetMessageContent(lineMessage.ID).Do()
 				if err != nil {
-					m.logger.Warn("fail to get image content")
+					m.Logger.Warn("fail to get image content")
 					continue
 				}
 				content, err := ioutil.ReadAll(response.Content)
 				response.Content.Close()
 				if err != nil {
-					m.logger.Warn("fail to read image content")
+					m.Logger.Warn("fail to read image content")
 					continue
 				}
-				m.logger.Info("got content, type=" + response.ContentType)
 				message.Image = telepathy.ByteContent{
 					Type:    response.ContentType,
 					Length:  response.ContentLength,
@@ -149,7 +147,7 @@ func (m *messenger) getSourceProfile(source *linebot.EventSource) (*telepathy.Ms
 			DisplayName: profile.DisplayName,
 		}, source.RoomID
 	} else {
-		m.Logger.Warn("Unknown source " + source.Type)
+		m.Logger.Warn("unknown source " + source.Type)
 		return nil, ""
 	}
 }

@@ -96,15 +96,15 @@ func (e MessengerInvalidError) Error() string {
 // RegisterMessenger registers a Messenger handler
 func RegisterMessenger(ID string, ctor MessengerCtor) error {
 	logger := logrus.WithField("messenger", ID)
-	logger.Info("Registering Messenger")
 	if msgrCtors == nil {
 		msgrCtors = make(map[string]MessengerCtor)
 	}
 
 	if msgrCtors[ID] != nil {
+		logger.Error("registered multiple times")
 		return MessengerExistsError{Name: ID}
 	}
-
+	logger.Info("registered")
 	msgrCtors[ID] = ctor
 	return nil
 }
@@ -116,6 +116,7 @@ func RegisterMessageHandler(handler InboundMsgHandler) {
 }
 
 func newMessengerManager(session *Session) *MessengerManager {
+	logger := logrus.WithField("module", "messenger")
 	manager := MessengerManager{
 		messengers: make(map[string]Messenger),
 		session:    session,
@@ -131,11 +132,11 @@ func newMessengerManager(session *Session) *MessengerManager {
 		param.Logger = logrus.WithField("messenger", ID)
 		manager.messengers[ID], err = ctor(&param)
 		if err != nil {
-			logger := logrus.WithField("module", "messenger")
-			logger.Error(err.Error())
+			logger.Errorf("failed to construct %s: %s", ID, err.Error())
+			continue
 		}
+		logger.Infof("created: %s", ID)
 	}
-
 	return &manager
 }
 
@@ -150,11 +151,6 @@ func (m *MessengerManager) Messenger(ID string) (GlobalMessenger, error) {
 
 func rootMsgHandler(ctx context.Context, session *Session, message InboundMessage) {
 	if isCmdMsg(message.Text) {
-		logger := logrus.WithFields(logrus.Fields{
-			"messenger": message.FromChannel.MessengerID,
-			"source":    message.FromChannel.ChannelID,
-			"text":      message.Text})
-		logger.Info("Got command message")
 		handleCmdMsg(ctx, session, &message)
 	} else {
 		for _, handler := range msgHandler {

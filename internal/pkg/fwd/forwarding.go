@@ -105,7 +105,6 @@ func bsonToTable(doc *bson.Document) *sync.Map {
 			}
 		}
 	}
-	fmt.Printf("%v\n", table)
 	return table
 }
 

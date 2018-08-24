@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"bytes"
 	"context"
 	"os"
 
@@ -67,7 +68,22 @@ func (m *messenger) Start(ctx context.Context) {
 }
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {
-	m.bot.ChannelMessageSend(message.TargetID, message.Text)
+	if message.Image.Length > 0 {
+		m.bot.ChannelMessageSendComplex(
+			message.TargetID,
+			&discordgo.MessageSend{
+				File: &discordgo.File{
+					Name:        "sent-from-telepathy.png", // always use png, just to make discord show the image
+					ContentType: message.Image.Type,
+					Reader:      bytes.NewReader(*message.Image.Content),
+				},
+			},
+		)
+	}
+
+	if len(message.Text) > 0 {
+		m.bot.ChannelMessageSend(message.TargetID, message.Text)
+	}
 }
 
 func (m *messenger) handler(_ *discordgo.Session, dgmessage *discordgo.MessageCreate) {

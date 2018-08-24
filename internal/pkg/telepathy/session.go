@@ -2,6 +2,7 @@ package telepathy
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -67,7 +68,14 @@ func (s *Session) Start(ctx context.Context) {
 
 	// Webhook stype messengers are handled together with a http server
 	logrus.WithField("module", "session").Info("start listening port: " + s.port)
-	server := http.Server{Addr: ":" + s.port, Handler: serveMux()}
+	mux := serveMux()
+
+	// Add a simple response at root
+	mux.HandleFunc("/", func(response http.ResponseWriter, request *http.Request) {
+		fmt.Fprint(response, "Telepathy Bot is Running")
+	})
+
+	server := http.Server{Addr: ":" + s.port, Handler: mux}
 	go server.ListenAndServe()
 
 	// Wait here until the session is Done

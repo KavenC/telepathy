@@ -73,8 +73,9 @@ func (m *messenger) Start(ctx context.Context) {
 }
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {
+	var err error
 	if message.Image.Length > 0 {
-		m.bot.ChannelMessageSendComplex(
+		_, err = m.bot.ChannelMessageSendComplex(
 			message.TargetID,
 			&discordgo.MessageSend{
 				Content: message.Text,
@@ -87,8 +88,12 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 		)
 	} else {
 		if len(message.Text) > 0 {
-			m.bot.ChannelMessageSend(message.TargetID, message.Text)
+			_, err = m.bot.ChannelMessageSend(message.TargetID, message.Text)
 		}
+	}
+
+	if err != nil {
+		m.Logger.Error("msg send failed: " + err.Error())
 	}
 }
 

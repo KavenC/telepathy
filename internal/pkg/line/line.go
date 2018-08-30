@@ -105,6 +105,7 @@ func (m *messenger) handler(response http.ResponseWriter, request *http.Request)
 					Content: &content,
 				}
 			default:
+				m.Logger.Warnf("unsupported message type: %T", event.Message)
 				continue
 			}
 			m.MsgHandler(m.ctx, m.MsgrCtorParam.Session, message)
@@ -172,14 +173,14 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 			"target":      message.TargetID,
 			"reply_token": replyTokenStr,
 		})
-		logger.Warn("Reply message fail.")
+		logger.Warn("reply message failed: " + err.Error())
+		logger.Info("trying push message")
 	}
 
 	call := m.bot.PushMessage(message.TargetID, lineMessage)
 	_, err := call.Do()
 	if err != nil {
 		logger := m.Logger.WithField("target", message.TargetID)
-		logger.Error("Push message fail.")
+		logger.Error("push message failed: " + err.Error())
 	}
-
 }

@@ -11,11 +11,11 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:35ac403a135b8a138870950720be1f0399e0a48387d4b5cca841b0ed8cf7a40b"
+  digest = "1:ad90cbfaeb74563adf5a06cd662036d2abcdc65984ddb2ba327f2de754c83421"
   name = "github.com/buger/jsonparser"
   packages = ["."]
   pruneopts = "UT"
-  revision = "2cac668e8456b4284edb0715e17e2af02d3ec993"
+  revision = "f4dd9f5a6b441265aefc1d44872a6f8c10f42b37"
 
 [[projects]]
   digest = "1:4fd5ce7844c22e194005b9e12fee8adc70fb5ba0bbba9e1964d2e3d1f301d789"
@@ -26,7 +26,7 @@
   version = "v0.18.0"
 
 [[projects]]
-  digest = "1:94836e6196fd3150edd474bde9afeeea27e7d51700cd3f3d44bb859b1951e998"
+  digest = "1:a9b34b1f8ed97398ef96d268a97dfbf16fa3b7b8109295758a7ea142dbb9cce8"
   name = "github.com/go-redis/redis"
   packages = [
     ".",
@@ -39,16 +39,16 @@
     "internal/util",
   ]
   pruneopts = "UT"
-  revision = "480db94d33e6088e08d628833b6c0705451d24bb"
-  version = "v6.13.2"
+  revision = "1614e579ed966441b8e0c3ccea1dd0fbbd93a6ae"
+  version = "v6.14.0"
 
 [[projects]]
-  digest = "1:c4a2528ccbcabf90f9f3c464a5fc9e302d592861bbfd0b7135a7de8a943d0406"
+  digest = "1:586ea76dbd0374d6fb649a91d70d652b7fe0ccffb8910a77468e7702e7901f3d"
   name = "github.com/go-stack/stack"
   packages = ["."]
   pruneopts = "UT"
-  revision = "259ab82a6cad3992b4e21ff5cac294ccb06474bc"
-  version = "v1.7.0"
+  revision = "2fee6af1a9795aafbe0253a0cfbdf668e1fb8a9a"
+  version = "v1.8.0"
 
 [[projects]]
   branch = "master"
@@ -59,12 +59,12 @@
   revision = "2e65f85255dbc3072edf28d6b5b8efc472979f5a"
 
 [[projects]]
-  digest = "1:43dd08a10854b2056e615d1b1d22ac94559d822e1f8b6fcc92c1a1057e85188e"
+  digest = "1:cee8e8ac80df6373e7daa11baf1f98c1b6f7242c49ccae7e1ec34a971dc408d9"
   name = "github.com/gorilla/websocket"
   packages = ["."]
   pruneopts = "UT"
-  revision = "ea4d1f681babbce9545c9c5f3d5194a789c89f5b"
-  version = "v1.2.0"
+  revision = "3ff3320c2a1756a3691521efc290b4701575147c"
+  version = "v1.3.0"
 
 [[projects]]
   digest = "1:870d441fe217b8e689d7949fef6e43efbc787e50f200cb1e70dbca9204a1d6be"
@@ -75,15 +75,15 @@
   version = "v1.0"
 
 [[projects]]
-  digest = "1:6e2470f8698872c20b887e3114f1ce3576cd61ca2d0a3d654db9bdfb0fedb832"
+  digest = "1:fc8b9119ac036faaab206f517421116d5cf2eaf35d213f6b5d8e2c74dba6f76c"
   name = "github.com/line/line-bot-sdk-go"
   packages = ["linebot"]
   pruneopts = "UT"
-  revision = "2bb2ee426892d0f0efe6ee399ae2d969fe3ca39f"
-  version = "3.0.0"
+  revision = "d787aef1744dc11dbde0fac149e6fbbdbe29d3d6"
+  version = "v4.0.0"
 
 [[projects]]
-  digest = "1:e4a9fca77a22102c0e6ec6229f58897a75be6c4458e7b1aa99d0fff80866216a"
+  digest = "1:00115187d356166b3a93ff6758ea443e418c45c497a8dcaaef1eadfb86ba0a19"
   name = "github.com/mongodb/mongo-go-driver"
   packages = [
     "bson",
@@ -133,11 +133,13 @@
     "mongo/mongoopt",
     "mongo/replaceopt",
     "mongo/runcmdopt",
+    "mongo/sessionopt",
+    "mongo/transactionopt",
     "mongo/updateopt",
   ]
   pruneopts = "UT"
-  revision = "8df56f107cdd485351eb2523992c3364114b4b2e"
-  version = "v0.0.10"
+  revision = "e3f321c2848b138976cf8c6143aab9702e2b2fc6"
+  version = "v0.0.12"
 
 [[projects]]
   digest = "1:d867dfa6751c8d7a435821ad3b736310c2ed68945d05b50fb9d23aee0540c8cc"
@@ -148,12 +150,28 @@
   version = "v1.0.6"
 
 [[projects]]
-  digest = "1:9424f440bba8f7508b69414634aef3b2b3a877e522d8a4624692412805407bb7"
+  digest = "1:dab83a1bbc7ad3d7a6ba1a1cc1760f25ac38cdf7d96a5cdd55cd915a4f5ceaf9"
   name = "github.com/spf13/pflag"
   packages = ["."]
   pruneopts = "UT"
-  revision = "583c0c0531f06d5278b7d917446061adc344b5cd"
-  version = "v1.0.1"
+  revision = "9a97c102cda95a86cec2345a6f09f55a939babf5"
+  version = "v1.0.2"
+
+[[projects]]
+  branch = "master"
+  digest = "1:40fdfd6ab85ca32b6935853bbba35935dcb1d796c8135efd85947566c76e662e"
+  name = "github.com/xdg/scram"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "7eeb5667e42c09cb51bf7b7c28aea8c56767da90"
+
+[[projects]]
+  digest = "1:577b99fc55ee19cbf1ffd072808c91ced78cd732bd9d0517bec9b90e532069cb"
+  name = "github.com/xdg/stringprep"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "bd625b8dc1e3b0f57412280ccbcc317f0c69d8db"
+  version = "v1.0.0"
 
 [[projects]]
   branch = "master"
@@ -168,7 +186,7 @@
     "ssh/terminal",
   ]
   pruneopts = "UT"
-  revision = "56440b844dfe139a8ac053f4ecac0b20b79058f4"
+  revision = "182538f80094b6a8efaade63a8fd8e0d9d5843dd"
 
 [[projects]]
   branch = "master"
@@ -176,7 +194,7 @@
   name = "golang.org/x/net"
   packages = ["context"]
   pruneopts = "UT"
-  revision = "f4c29de78a2a91c00474a2e689954305c350adf9"
+  revision = "8a410e7b638dca158bf9e766925842f6651ff828"
 
 [[projects]]
   branch = "master"
@@ -188,14 +206,29 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:fdbfac596a38ec195decf850daa9934d5f136a8055ab24eba104fc9406ff12dd"
+  digest = "1:b05e7374c1f4785cf6732f195d05f91022463d968727b51598dbd1999d0ae901"
   name = "golang.org/x/sys"
   packages = [
     "unix",
     "windows",
   ]
   pruneopts = "UT"
-  revision = "34b17bdb430002e9db9ae7ddc8480b9fa05edc22"
+  revision = "fa5fdf94c78965f1aa8423f0cc50b8b8d728b05a"
+
+[[projects]]
+  digest = "1:038003d098ffc345c4c5c6d47bcc6920b2649ee0c0d557162e54e75c76cadf8b"
+  name = "golang.org/x/text"
+  packages = [
+    "internal/gen",
+    "internal/triegen",
+    "internal/ucd",
+    "transform",
+    "unicode/cldr",
+    "unicode/norm",
+  ]
+  pruneopts = "UT"
+  revision = "f21a4dfb5e38f5895301dc265a8def02365cc3d0"
+  version = "v0.3.0"
 
 [solve-meta]
   analyzer-name = "dep"

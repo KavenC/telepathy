@@ -205,7 +205,9 @@
     "github.com/bwmarrin/discordgo",
     "github.com/go-redis/redis",
     "github.com/line/line-bot-sdk-go/linebot",
+    "github.com/mongodb/mongo-go-driver/bson",
     "github.com/mongodb/mongo-go-driver/mongo",
+    "github.com/mongodb/mongo-go-driver/mongo/replaceopt",
     "github.com/sirupsen/logrus",
   ]
   solver-name = "gps-cdcl"

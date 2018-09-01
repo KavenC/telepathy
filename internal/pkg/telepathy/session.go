@@ -61,6 +61,19 @@ func (s *Session) Start(ctx context.Context) {
 	// Start database
 	go s.DB.start(ctx)
 
+	// Init resources
+	for name, ctor := range resourceCtors {
+		resrc, err := ctor(s)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"module": "resource",
+				"name":   name,
+			}).Error("resource init failed: " + err.Error())
+			continue
+		}
+		s.Resrc.Store(name, resrc)
+	}
+
 	// Start messenger handlers
 	for _, messenger := range s.Msgr.messengers {
 		go messenger.Start(ctx)

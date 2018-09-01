@@ -99,6 +99,22 @@ func init() {
 	})
 
 	cmd.AddCommand(&cobra.Command{
+		Use:     "del-from",
+		Example: "del-from LINE(channelId) DISCORD(channelId)",
+		Args:    cobra.MinimumNArgs(1),
+		Short:   "Stop receiving forwarded messages from specified channels",
+		Run:     delFrom,
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:     "del-to",
+		Example: "del-to LINE(channelId) DISCORD(channelId)",
+		Args:    cobra.MinimumNArgs(1),
+		Short:   "Stop forwarding messages to specified channels",
+		Run:     delTo,
+	})
+
+	cmd.AddCommand(&cobra.Command{
 		Use:     "set",
 		Example: "set [key]",
 		Short:   "Used for identify channels various channel features.",
@@ -498,5 +514,57 @@ func set(cmd *cobra.Command, args []string, extras ...interface{}) {
 		if replyStr != "" {
 			cmd.Print(replyStr)
 		}
+	}
+}
+
+func delFrom(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs := telepathy.NewCmdExtraArgs(extras...)
+	thisCh := extraArgs.Message.FromChannel
+	manager := manager(extraArgs.Session)
+	change := false
+	for _, fromChName := range args {
+		fromCh := telepathy.NewChannel(fromChName)
+		if !manager.removeForwarding(*fromCh, thisCh) {
+			cmd.Printf("Invalid channel: %s\n", fromChName)
+			continue
+		}
+		cmd.Printf("Stop receiving messages from: %s\n", fromChName)
+		messenger, _ := extraArgs.Session.Msgr.Messenger(fromCh.MessengerID)
+		msg := telepathy.OutboundMessage{
+			TargetID: fromCh.ChannelID,
+			Text:     fmt.Sprintf("Message forwarding to: %s has been stopped\n", thisCh.Name()),
+		}
+		messenger.Send(&msg)
+		change = true
+	}
+
+	if change {
+		manager.writeToDB()
+	}
+}
+
+func delTo(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs := telepathy.NewCmdExtraArgs(extras...)
+	thisCh := extraArgs.Message.FromChannel
+	manager := manager(extraArgs.Session)
+	change := false
+	for _, toChName := range args {
+		toCh := telepathy.NewChannel(toChName)
+		if !manager.removeForwarding(thisCh, *toCh) {
+			cmd.Printf("Invalid channel: %s\n", toChName)
+			continue
+		}
+		cmd.Printf("Stop forwarding messages to: %s\n", toChName)
+		messenger, _ := extraArgs.Session.Msgr.Messenger(toCh.MessengerID)
+		msg := telepathy.OutboundMessage{
+			TargetID: toCh.ChannelID,
+			Text:     fmt.Sprintf("Message forwarding from: %s has been stopped\n", thisCh.Name()),
+		}
+		messenger.Send(&msg)
+		change = true
+	}
+
+	if change {
+		manager.writeToDB()
 	}
 }

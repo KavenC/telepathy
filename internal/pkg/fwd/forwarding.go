@@ -130,6 +130,7 @@ func (m *forwardingManager) removeForwarding(from, to telepathy.Channel) bool {
 	if toList[to] {
 		delete(toList, to)
 		m.table.Store(from, toList)
+		logger.Infof("Fwd Deleted: %s -> %s", from.Name(), to.Name())
 		return true
 	}
 	return false
@@ -162,15 +163,13 @@ func (m *forwardingManager) forwardingFrom(to telepathy.Channel) channelList {
 }
 
 func (m *forwardingManager) writeToDB() chan interface{} {
-	retCh := make(chan interface{})
+	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			logger := logger.WithField("phase", "db")
 			logger.Info("Start write-back to DB")
 			collection := db.Collection(funcKey)
 			doc := tableToBSON(m.table)
-			m.Lock()
-			defer m.Unlock()
 			result, err := collection.ReplaceOne(ctx,
 				map[string]string{"type": "fwdtable"}, doc,
 				replaceopt.Upsert(true))
@@ -186,7 +185,7 @@ func (m *forwardingManager) writeToDB() chan interface{} {
 }
 
 func (m *forwardingManager) loadFromDB() chan interface{} {
-	retCh := make(chan interface{})
+	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			logger := logger.WithField("phase", "db")

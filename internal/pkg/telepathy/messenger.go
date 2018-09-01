@@ -2,6 +2,7 @@ package telepathy
 
 import (
 	"context"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -66,6 +67,11 @@ type MessengerInvalidError struct {
 	Name string
 }
 
+// MessengerIllegalNameError indicates using illegal name to register a msgr handler
+type MessengerIllegalNameError struct {
+	Name string
+}
+
 // MsgrCtorParam is the parameter for MessengerCtor
 // This is used to pass framework information to Messenger modules
 type MsgrCtorParam struct {
@@ -93,6 +99,10 @@ func (e MessengerInvalidError) Error() string {
 	return "Messenger: " + e.Name + " does not exist"
 }
 
+func (e MessengerIllegalNameError) Error() string {
+	return "Illegal messenger name: " + e.Name
+}
+
 // RegisterMessenger registers a Messenger handler
 func RegisterMessenger(ID string, ctor MessengerCtor) error {
 	logger := logrus.WithField("messenger", ID)
@@ -100,10 +110,16 @@ func RegisterMessenger(ID string, ctor MessengerCtor) error {
 		msgrCtors = make(map[string]MessengerCtor)
 	}
 
+	if strings.Contains(ID, channelDelimiter) {
+		logger.Error("messenger name cannot contain: " + channelDelimiter)
+		return MessengerIllegalNameError{Name: ID}
+	}
+
 	if msgrCtors[ID] != nil {
 		logger.Error("registered multiple times")
 		return MessengerExistsError{Name: ID}
 	}
+
 	logger.Info("registered")
 	msgrCtors[ID] = ctor
 	return nil

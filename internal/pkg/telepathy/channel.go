@@ -3,9 +3,13 @@ package telepathy
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/KavenC/cobra"
+	"github.com/sirupsen/logrus"
 )
+
+const channelDelimiter = "@"
 
 // Channel is an abstract type for a communication session of a messenger APP
 type Channel struct {
@@ -38,7 +42,19 @@ func cmdChannelName(cmd *cobra.Command, args []string, extras ...interface{}) {
 
 // Name returns a formated name of a Channel object
 func (ch *Channel) Name() string {
-	return fmt.Sprintf("%s: %s", ch.MessengerID, ch.ChannelID)
+	ret := fmt.Sprintf("%s%s%s", ch.MessengerID, channelDelimiter, ch.ChannelID)
+	if strings.Contains(ch.ChannelID, channelDelimiter) {
+		logrus.WithField("module", "channel").Warn("channel id contains delimeter: " + ret)
+	}
+	return ret
+}
+
+// NewChannel creates a channel object from channel name
+func NewChannel(channelName string) *Channel {
+	s := strings.Split(channelName, channelDelimiter)
+	return &Channel{
+		MessengerID: s[0],
+		ChannelID:   strings.Join(s[1:], "")}
 }
 
 // JSON returns JSON representation of Channel

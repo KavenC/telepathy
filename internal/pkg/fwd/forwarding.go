@@ -28,26 +28,31 @@ type forwardingManager struct {
 
 func init() {
 	telepathy.RegisterMessageHandler(msgHandler)
+	telepathy.RegisterResource(funcKey, resourceCtor)
+}
+
+func resourceCtor(s *telepathy.Session) (interface{}, error) {
+	manager := &forwardingManager{
+		session: s,
+		table:   &sync.Map{},
+	}
+	<-manager.loadFromDB()
+	return manager, nil
 }
 
 func manager(s *telepathy.Session) *forwardingManager {
-	m, loaded := s.Resrc.LoadOrStore(funcKey, &forwardingManager{
-		session: s,
-		table:   &sync.Map{},
-	})
-	ret, ok := m.(*forwardingManager)
+	load, ok := s.Resrc.Load(funcKey)
 	if !ok {
-		logger.Error("Unable to get resource: forwardingManager")
+		logger.Error("failed to load manager")
+		return &forwardingManager{table: &sync.Map{}}
+	}
+	ret, ok := load.(*forwardingManager)
+	if !ok {
+		logger.Errorf("resource type error: %v", load)
 		// Return a dummy manager to keeps things going
 		// But it wont work well for sure
 		return &forwardingManager{table: &sync.Map{}}
 	}
-
-	if !loaded {
-		// Init table with DB content
-		<-ret.loadFromDB()
-	}
-
 	return ret
 }
 

@@ -163,7 +163,7 @@ func (m *forwardingManager) forwardingFrom(to telepathy.Channel) channelList {
 }
 
 func (m *forwardingManager) writeToDB() chan interface{} {
-	retCh := make(chan interface{})
+	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			logger := logger.WithField("phase", "db")
@@ -185,7 +185,7 @@ func (m *forwardingManager) writeToDB() chan interface{} {
 }
 
 func (m *forwardingManager) loadFromDB() chan interface{} {
-	retCh := make(chan interface{})
+	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			logger := logger.WithField("phase", "db")

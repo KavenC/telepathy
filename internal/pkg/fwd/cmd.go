@@ -99,6 +99,20 @@ func init() {
 	})
 
 	cmd.AddCommand(&cobra.Command{
+		Use:     "del-from",
+		Example: "del-from LINE(channelId) DISCORD(channelId)",
+		Args:    cobra.MinimumNArgs(1),
+		Short:   "Stop receiving forwarded messages from specified channels",
+	})
+
+	cmd.AddCommand(&cobra.Command{
+		Use:     "del-to",
+		Example: "del-to LINE(channelId) DISCORD(channelId)",
+		Args:    cobra.MinimumNArgs(1),
+		Short:   "Stop forwarding messages to specified channels",
+	})
+
+	cmd.AddCommand(&cobra.Command{
 		Use:     "set",
 		Example: "set [key]",
 		Short:   "Used for identify channels various channel features.",

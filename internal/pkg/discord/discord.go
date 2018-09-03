@@ -3,9 +3,13 @@ package discord
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"os"
+	"path"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
@@ -74,7 +78,7 @@ func (m *messenger) Start(ctx context.Context) {
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {
 	var err error
-	if message.Image.Length > 0 {
+	if message.Image != nil {
 		_, err = m.bot.ChannelMessageSendComplex(
 			message.TargetID,
 			&discordgo.MessageSend{
@@ -82,7 +86,7 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 				File: &discordgo.File{
 					Name:        "sent-from-telepathy.png", // always use png, just to make discord show the image
 					ContentType: message.Image.Type,
-					Reader:      bytes.NewReader(*message.Image.Content),
+					Reader:      bytes.NewReader(message.Image.Content),
 				},
 			},
 		)
@@ -95,6 +99,27 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 	if err != nil {
 		m.Logger.Error("msg send failed: " + err.Error())
 	}
+}
+
+func createImgContent(att *discordgo.MessageAttachment, logger *logrus.Entry) *telepathy.ByteContent {
+	dl, err := http.Get(att.ProxyURL)
+	if err != nil {
+		logger.Error("download attached image failed: " + err.Error())
+		return nil
+	}
+	defer dl.Body.Close()
+	buf := bytes.NewBuffer([]byte{})
+	buf.ReadFrom(dl.Body)
+	content := telepathy.ByteContent{
+		Content: buf.Bytes(),
+	}
+	ext := strings.ToLower(path.Ext(att.Filename))
+	if ext == "" {
+		logger.Warn("unknown attach image type: " + att.Filename)
+		ext = "png"
+	}
+	content.Type = "image/" + ext
+	return &content
 }
 
 func (m *messenger) handler(_ *discordgo.Session, dgmessage *discordgo.MessageCreate) {
@@ -113,6 +138,16 @@ func (m *messenger) handler(_ *discordgo.Session, dgmessage *discordgo.MessageCr
 			DisplayName: dgmessage.Author.Username,
 		},
 		Text: dgmessage.Content,
+	}
+
+	if len(dgmessage.Attachments) > 0 {
+		// Widht > 0 && Height > 0 indicates that this is a image file
+		if att := dgmessage.Attachments[0]; att.Height > 0 && att.Width > 0 {
+			content := createImgContent(att, m.Logger)
+			if content != nil {
+				message.Image = telepathy.NewImage(*content)
+			}
+		}
 	}
 
 	channel, err := m.bot.Channel(dgmessage.ChannelID)

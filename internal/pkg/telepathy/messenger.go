@@ -13,28 +13,20 @@ type MsgrUserProfile struct {
 	DisplayName string
 }
 
-// ByteContent is a general type for message content that can be
-// stored in byte array. ex: Image
-type ByteContent struct {
-	Type    string
-	Length  int64
-	Content *[]byte
-}
-
 // InboundMessage models a message send to Telepthy bot
 type InboundMessage struct {
 	FromChannel     Channel
 	SourceProfile   *MsgrUserProfile
 	Text            string
 	IsDirectMessage bool
-	Image           ByteContent
+	Image           *Image
 }
 
 // OutboundMessage models a message send to Client (through messenger)
 type OutboundMessage struct {
 	TargetID string
 	Text     string
-	Image    ByteContent
+	Image    *Image
 }
 
 // GlobalMessenger defines global interfaces of a messenger handler

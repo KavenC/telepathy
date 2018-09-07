@@ -154,14 +154,33 @@ func (m *messenger) getSourceProfile(source *linebot.EventSource) (*telepathy.Ms
 }
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {
+
+	messages := []linebot.SendingMessage{}
+
+	if message.Text != "" {
+		messages = append(messages, linebot.NewTextMessage(message.Text))
+	}
+
+	if message.Image != nil {
+		fullURL, err := message.Image.FullURL()
+		var prevURL string
+		if err == nil {
+			prevURL, err = message.Image.SmallThumbnailURL()
+		}
+		if err != nil {
+			m.Logger.Error("unable to get image URL: " + err.Error())
+		} else {
+			messages = append(messages, linebot.NewImageMessage(fullURL, prevURL))
+		}
+	}
+
 	// Try to use reply token
 	item, _ := m.replyTokenMap.LoadOrStore(message.TargetID, &sync.Pool{})
 	pool, _ := item.(*sync.Pool)
 	item = pool.Get()
-	lineMessage := linebot.NewTextMessage(message.Text)
 	if item != nil {
 		replyTokenStr, _ := item.(string)
-		call := m.bot.ReplyMessage(replyTokenStr, lineMessage)
+		call := m.bot.ReplyMessage(replyTokenStr, messages...)
 		_, err := call.Do()
 
 		if err == nil {
@@ -177,7 +196,7 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 		logger.Info("trying push message")
 	}
 
-	call := m.bot.PushMessage(message.TargetID, lineMessage)
+	call := m.bot.PushMessage(message.TargetID, messages...)
 	_, err := call.Do()
 	if err != nil {
 		logger := m.Logger.WithField("target", message.TargetID)

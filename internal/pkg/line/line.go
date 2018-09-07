@@ -99,11 +99,11 @@ func (m *messenger) handler(response http.ResponseWriter, request *http.Request)
 					m.Logger.Warn("fail to read image content")
 					continue
 				}
-				message.Image = telepathy.ByteContent{
-					Type:    response.ContentType,
-					Length:  response.ContentLength,
-					Content: &content,
-				}
+				message.Image = telepathy.NewImage(
+					telepathy.ByteContent{
+						Type:    response.ContentType,
+						Content: content,
+					})
 			default:
 				m.Logger.Warnf("unsupported message type: %T", event.Message)
 				continue

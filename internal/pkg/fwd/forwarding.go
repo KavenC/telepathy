@@ -222,7 +222,7 @@ func msgHandler(ctx context.Context, t *telepathy.Session, message telepathy.Inb
 				TargetID: toCh.ChannelID,
 				Image:    message.Image,
 			}
-			if len(message.Text) != 0 || message.Image.Length != 0 {
+			if len(message.Text) != 0 || message.Image != nil {
 				outMsg.Text = text
 			}
 			msgr, _ := t.Msgr.Messenger(toCh.MessengerID)

@@ -58,7 +58,7 @@ func (img *Image) SmallThumbnailURL() (string, error) {
 	}
 	// Works only for imgur
 	dotIdx := strings.LastIndexByte(url, '.')
-	return url[:dotIdx] + "t" + url[dotIdx:], nil
+	return url[:dotIdx] + "l" + url[dotIdx:], nil
 }
 
 func uploadImage(content *ByteContent) (string, error) {

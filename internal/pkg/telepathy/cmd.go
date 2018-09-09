@@ -23,11 +23,12 @@ type CmdExistsError struct {
 }
 
 // CommandPrefix is the trigger word for the Telepathy command message
-const CommandPrefix = "#tele#"
+const CommandPrefix = "teru"
 
 var rootCmd = &cobra.Command{
-	Use: CommandPrefix,
+	Use:                   CommandPrefix,
 	DisableFlagsInUseLine: true,
+	Args:                  cobra.MinimumNArgs(1),
 	Run: func(*cobra.Command, []string, ...interface{}) {
 		// Do nothing
 	},

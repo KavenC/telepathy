@@ -1,6 +1,8 @@
 package plurkrss
 
 import (
+	"net/http"
+
 	"github.com/KavenC/cobra"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
@@ -11,6 +13,7 @@ var logger = logrus.WithField("module", "plurkrss")
 const funcKey = "plurk"
 
 func init() {
+	// Construct command interface
 	cmd := &cobra.Command{
 		Use:   funcKey,
 		Short: "Plurk RSS Subscription Service",
@@ -40,6 +43,14 @@ func init() {
 	})
 
 	telepathy.RegisterCommand(cmd)
+
+	// Register Webhook for incoming plurk new post notifications
+	telepathy.RegisterWebhook("plurk", webhook)
+}
+
+func webhook(response http.ResponseWriter, _ *http.Request) {
+	// Parse new plurk post notification
+	response.WriteHeader(200)
 }
 
 func subscribe(cmd *cobra.Command, args []string, extras ...interface{}) {

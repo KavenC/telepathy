@@ -62,8 +62,9 @@ func subscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
 
 	if subManager.createSub(&user, &channel) {
 		cmd.Printf("Subscribed to Plurk user: " + user)
+		subManager.writeToDB()
 	} else {
-		cmd.Printf("This channel has already subscribed to Plurk user(s): " + user)
+		cmd.Printf("This channel has already subscribed to Plurk user: " + user)
 	}
 }
 
@@ -76,7 +77,7 @@ func list(cmd *cobra.Command, args []string, extras ...interface{}) {
 	}
 
 	subs := subManager.subscriptions(&channel)
-	cmd.Printf("This channel is subscribing Plurk user: %s", strings.Join(subs, ", "))
+	cmd.Printf("This channel is subscribing Plurk user(s): %s", strings.Join(subs, ", "))
 }
 
 func unsubscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
@@ -93,6 +94,7 @@ func unsubscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
 	subManager := manager(extraArgs.Session)
 	if subManager.removeSub(&user, &channel) {
 		cmd.Printf("Unsubscribed to Plurk user: " + user)
+		subManager.writeToDB()
 	} else {
 		cmd.Printf("This channel has not subscribed to Plurk user: " + user)
 	}

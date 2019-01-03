@@ -130,6 +130,35 @@ func (m *plurkSubManager) createSubNoLock(user *string, channel *telepathy.Chann
 		}
 		subr[*channel] = true
 	}
-	logger.Infof("Subscription: %s -> %s", *user, *channel)
+	logger.Infof("Subscribe: %s -> %s", *user, *channel)
 	return true
+}
+
+func (m *plurkSubManager) removeSub(user *string, channel *telepathy.Channel) bool {
+	m.Lock()
+	defer m.Unlock()
+	load, ok := m.subList.Load(*user)
+	if ok {
+		subrList, _ := load.(channelList)
+		if subrList[*channel] {
+			delete(subrList, *channel)
+			m.subList.Store(*user, subrList)
+			logger.Infof("Unsubscribe: %s -> %s", *user, *channel)
+			return true
+		}
+	}
+	return false
+}
+
+func (m *plurkSubManager) subscriptions(channel *telepathy.Channel) []string {
+	subs := []string{}
+	m.subList.Range(func(key, value interface{}) bool {
+		subrList, _ := value.(channelList)
+		if subrList[*channel] {
+			user, _ := key.(string)
+			subs = append(subs, user)
+		}
+		return true
+	})
+	return subs
 }

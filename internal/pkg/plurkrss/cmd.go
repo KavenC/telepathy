@@ -1,6 +1,8 @@
 package plurkrss
 
 import (
+	"strings"
+
 	"github.com/KavenC/cobra"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
@@ -61,43 +63,37 @@ func subscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
 	if subManager.createSub(&user, &channel) {
 		cmd.Printf("Subscribed to Plurk user: " + user)
 	} else {
-		cmd.Printf("This channel has already subscribed to Plurk user: " + user)
+		cmd.Printf("This channel has already subscribed to Plurk user(s): " + user)
 	}
 }
 
 func list(cmd *cobra.Command, args []string, extras ...interface{}) {
 	extraArgs := telepathy.NewCmdExtraArgs(extras...)
-
-	msg := extraArgs.Message.FromChannel.MessengerID
-	cid := extraArgs.Message.FromChannel.ChannelID
-
-	omsg := &telepathy.OutboundMessage{
-		TargetID: cid,
-		Text:     "list",
-	}
-
-	msgr, err := extraArgs.Session.Msgr.Messenger(msg)
-	if err != nil {
+	channel := extraArgs.Message.FromChannel
+	subManager := manager(extraArgs.Session)
+	if subManager == nil {
 		return
 	}
-	msgr.Send(omsg)
+
+	subs := subManager.subscriptions(&channel)
+	cmd.Printf("This channel is subscribing Plurk user: %s", strings.Join(subs, ", "))
 }
 
 func unsubscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
 	extraArgs := telepathy.NewCmdExtraArgs(extras...)
 
-	msg := extraArgs.Message.FromChannel.MessengerID
-	cid := extraArgs.Message.FromChannel.ChannelID
+	channel := extraArgs.Message.FromChannel
 	user := args[0]
 
-	omsg := &telepathy.OutboundMessage{
-		TargetID: cid,
-		Text:     "unsub " + user,
-	}
-
-	msgr, err := extraArgs.Session.Msgr.Messenger(msg)
-	if err != nil {
+	if user == "" {
+		cmd.Print("Invalid Plurk user")
 		return
 	}
-	msgr.Send(omsg)
+
+	subManager := manager(extraArgs.Session)
+	if subManager.removeSub(&user, &channel) {
+		cmd.Printf("Unsubscribed to Plurk user: " + user)
+	} else {
+		cmd.Printf("This channel has not subscribed to Plurk user: " + user)
+	}
 }

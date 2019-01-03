@@ -10,6 +10,7 @@ import (
 	_ "gitlab.com/kavenc/telepathy/internal/pkg/discord"
 	_ "gitlab.com/kavenc/telepathy/internal/pkg/fwd"
 	_ "gitlab.com/kavenc/telepathy/internal/pkg/line"
+	_ "gitlab.com/kavenc/telepathy/internal/pkg/plurkrss"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 

@@ -15,11 +15,6 @@ import (
 
 type channelList map[telepathy.Channel]bool
 
-// PlainTable is the fwd table type used in Database
-type PlainTable map[telepathy.Channel][]telepathy.Channel
-
-// DBEntry is the type to be stored in the DB
-
 type forwardingManager struct {
 	session *telepathy.Session
 	sync.Mutex

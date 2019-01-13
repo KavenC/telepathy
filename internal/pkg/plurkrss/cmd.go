@@ -8,11 +8,11 @@ import (
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
-var logger = logrus.WithField("module", "plurkrss")
-
 const funcKey = "plurk"
 
-func init() {
+var logger = logrus.WithField("module", funcKey)
+
+func (m *plurkSubManager) CommandInterface() *cobra.Command {
 	// Construct command interface
 	cmd := &cobra.Command{
 		Use:   funcKey,
@@ -27,26 +27,31 @@ func init() {
 		Example: "subscribe Regular",
 		Short:   "Subscribe a plurk user and forwards post to current channel",
 		Args:    cobra.ExactArgs(1),
-		Run:     subscribe,
+		Run:     m.subscribe,
 	})
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "list",
 		Short: "List all subscriptions",
-		Run:   list,
+		Run:   m.list,
 	})
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "unsub [username]",
 		Short: "Unsubscribes a plurk user",
-		Run:   unsubscribe,
+		Run:   m.unsubscribe,
 	})
 
-	telepathy.RegisterCommand(cmd)
+	return cmd
 }
 
-func subscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.NewCmdExtraArgs(extras...)
+func (m *plurkSubManager) subscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
+		cmd.Print("Internal error. Command failed.")
+		return
+	}
 
 	channel := extraArgs.Message.FromChannel
 	user := args[0]
@@ -55,33 +60,35 @@ func subscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
 		cmd.Print("Invalid Plurk user")
 	}
 
-	subManager := manager(extraArgs.Session)
-	if subManager == nil {
-		return
-	}
-
-	if subManager.createSub(&user, &channel) {
+	if m.createSub(&user, &channel) {
 		cmd.Printf("Subscribed to Plurk user: " + user)
-		subManager.writeToDB()
+		m.writeToDB()
 	} else {
 		cmd.Printf("This channel has already subscribed to Plurk user: " + user)
 	}
 }
 
-func list(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.NewCmdExtraArgs(extras...)
-	channel := extraArgs.Message.FromChannel
-	subManager := manager(extraArgs.Session)
-	if subManager == nil {
+func (m *plurkSubManager) list(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
+		cmd.Print("Internal error. Command failed.")
 		return
 	}
 
-	subs := subManager.subscriptions(&channel)
+	channel := extraArgs.Message.FromChannel
+
+	subs := m.subscriptions(&channel)
 	cmd.Printf("This channel is subscribing Plurk user(s): %s", strings.Join(subs, ", "))
 }
 
-func unsubscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.NewCmdExtraArgs(extras...)
+func (m *plurkSubManager) unsubscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
+		cmd.Print("Internal error. Command failed.")
+		return
+	}
 
 	channel := extraArgs.Message.FromChannel
 	user := args[0]
@@ -91,10 +98,9 @@ func unsubscribe(cmd *cobra.Command, args []string, extras ...interface{}) {
 		return
 	}
 
-	subManager := manager(extraArgs.Session)
-	if subManager.removeSub(&user, &channel) {
+	if m.removeSub(&user, &channel) {
 		cmd.Printf("Unsubscribed to Plurk user: " + user)
-		subManager.writeToDB()
+		m.writeToDB()
 	} else {
 		cmd.Printf("This channel has not subscribed to Plurk user: " + user)
 	}

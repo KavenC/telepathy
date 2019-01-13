@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/mongodb/mongo-go-driver/mongo/replaceopt"
@@ -21,31 +23,35 @@ const dbType = "plurksubtable"
 type channelList map[telepathy.Channel]bool
 
 type plurkSubManager struct {
+	telepathy.ServicePlugin
 	sync.Mutex
 	session *telepathy.Session
 	subList *sync.Map
+	context context.Context
+	logger  *logrus.Entry
 }
 
 func init() {
-	telepathy.RegisterResource(funcKey, resourceCtor)
+	telepathy.RegisterService(funcKey, ctor)
 }
 
-func manager(s *telepathy.Session) *plurkSubManager {
-	load, ok := s.Resrc.Load(funcKey)
-	if !ok {
-		logger.Error("failed to load manager")
-		// Return a dummy manager to keeps things going
-		// But it wont work well for sure
-		return &plurkSubManager{subList: &sync.Map{}}
+func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
+	manager := &plurkSubManager{
+		session: param.Session,
+		subList: &sync.Map{},
+		logger:  param.Logger,
 	}
-	ret, ok := load.(*plurkSubManager)
-	if !ok {
-		logger.Errorf("resource type error: %v", load)
-		// Return a dummy manager to keeps things going
-		// But it wont work well for sure
-		return &plurkSubManager{subList: &sync.Map{}}
-	}
-	return ret
+	manager.session.WebServer.RegisterWebhook(funcKey, manager.webhook)
+	return manager, nil
+}
+
+func (m *plurkSubManager) Start(context context.Context) {
+	m.context = context
+	<-m.loadFromDB()
+}
+
+func (m *plurkSubManager) ID() string {
+	return funcKey
 }
 
 func (m *plurkSubManager) webhook(response http.ResponseWriter, req *http.Request) {
@@ -104,22 +110,9 @@ Date/Time: %s
 			TargetID: channel.ChannelID,
 			Text:     msgBody,
 		}
-		msgr, _ := m.session.Msgr.Messenger(channel.MessengerID)
+		msgr, _ := m.session.Message.Messenger(channel.MessengerID)
 		msgr.Send(msg)
 	}
-}
-
-func resourceCtor(s *telepathy.Session) (interface{}, error) {
-	manager := &plurkSubManager{
-		session: s,
-		subList: &sync.Map{},
-	}
-
-	wait := manager.loadFromDB()
-	telepathy.RegisterWebhook(funcKey, manager.webhook)
-	<-wait
-
-	return manager, nil
 }
 
 func tableToBSON(table *sync.Map) *bson.Document {
@@ -167,17 +160,14 @@ func (m *plurkSubManager) writeToDB() chan interface{} {
 	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
-			logger := logger.WithField("phase", "db")
-			logger.Info("Start write-back to DB")
 			collection := db.Collection(funcKey)
 			doc := tableToBSON(m.subList)
 			result, err := collection.ReplaceOne(ctx,
 				map[string]string{"type": dbType}, doc,
 				replaceopt.Upsert(true))
 			if err != nil {
-				logger.Error("Error when write-back to DB: " + err.Error())
+				m.logger.Error("error when write-back to DB: " + err.Error())
 			}
-			logger.Infof("write-back to DB, Done: result=%v", result)
 			return result
 		},
 		Return: retCh,
@@ -189,8 +179,6 @@ func (m *plurkSubManager) loadFromDB() chan interface{} {
 	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
-			logger := logger.WithField("phase", "db")
-			logger.Info("Start loading from DB")
 			collection := db.Collection(funcKey)
 			m.Lock()
 			defer m.Unlock()
@@ -198,11 +186,11 @@ func (m *plurkSubManager) loadFromDB() chan interface{} {
 			doc := bson.NewDocument()
 			err := result.Decode(doc)
 			if err != nil {
-				logger.Error("Error when load from DB: " + err.Error())
+				m.logger.Error("error when load from DB: " + err.Error())
 			} else {
 				m.subList = bsonToTable(doc)
 			}
-			logger.Info("load from DB, Done")
+			m.logger.Info("load from DB done")
 			return result
 		},
 		Return: retCh,
@@ -227,7 +215,6 @@ func createSubNoLock(user *string, channel *telepathy.Channel, table *sync.Map) 
 		}
 		subr[*channel] = true
 	}
-	logger.Infof("Subscribe: %s -> %s", *user, channel.Name())
 	return true
 }
 
@@ -240,7 +227,6 @@ func (m *plurkSubManager) removeSub(user *string, channel *telepathy.Channel) bo
 		if subrList[*channel] {
 			delete(subrList, *channel)
 			m.subList.Store(*user, subrList)
-			logger.Infof("Unsubscribe: %s -> %s", *user, channel.Name())
 			return true
 		}
 	}

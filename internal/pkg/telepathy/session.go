@@ -2,9 +2,6 @@ package telepathy
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -12,25 +9,31 @@ import (
 
 // Session defines a Telepathy server session
 type Session struct {
-	ctx   context.Context
-	port  string
-	Redis *redisHandle
-	DB    *databaseHandler
-	Msgr  *MessengerManager
-	Resrc sync.Map
+	ctx       context.Context
+	Redis     *redisHandle
+	DB        *databaseHandler
+	Message   *MessageManager
+	Service   *serviceManager
+	WebServer httpServer
+	Command   *cmdManager
 }
 
 // SessionConfig defines the configurations of a Telepathy session
 type SessionConfig struct {
-	Port         string
-	RedisURL     string
-	MongoURL     string
-	DatabaseName string
+	// Infrastructure configs
+	Port         string // Port Number for Webhook handling server
+	RedisURL     string // URL to the Redis server
+	MongoURL     string // URL to the MongoDB Server
+	DatabaseName string // MongoDB database name
+	// Messenger Config
+	MessengerConfigTable map[string]MessengerConfig
 }
 
 // NewSession creates a new Telepathy session
 func NewSession(config SessionConfig) (*Session, error) {
-	session := Session{port: config.Port}
+	session := Session{
+		WebServer: httpServer{},
+	}
 	var err error
 
 	// Init redis
@@ -45,8 +48,19 @@ func NewSession(config SessionConfig) (*Session, error) {
 		return nil, err
 	}
 
+	// Init command manager
+	session.Command = newCmdManager(&session)
+
 	// Init messenger
-	session.Msgr = newMessengerManager(&session)
+	session.Message = newMessageManager(&session, &config.MessengerConfigTable)
+
+	// Init service
+	// Internal service
+	RegisterService(channelServiceID, newChannelService)
+	session.Service = newServiceManager(&session)
+
+	// Init httpServer
+	session.WebServer.init(config.Port)
 
 	return &session, nil
 }
@@ -61,35 +75,19 @@ func (s *Session) Start(ctx context.Context) {
 	// Start database
 	go s.DB.start(ctx)
 
-	// Init resources
-	for name, ctor := range resourceCtors {
-		resrc, err := ctor(s)
-		if err != nil {
-			logrus.WithFields(logrus.Fields{
-				"module": "resource",
-				"name":   name,
-			}).Error("resource init failed: " + err.Error())
-			continue
-		}
-		s.Resrc.Store(name, resrc)
-	}
-
 	// Start messenger handlers
-	for _, messenger := range s.Msgr.messengers {
+	for _, messenger := range s.Message.messengers {
 		go messenger.Start(ctx)
 	}
 
-	// Webhook stype messengers are handled together with a http server
-	logrus.WithField("module", "session").Info("start listening port: " + s.port)
-	mux := serveMux()
+	// Start services
+	for _, service := range s.Service.services {
+		go service.Start(ctx)
+	}
 
-	// Add a simple response at root
-	mux.HandleFunc("/", func(response http.ResponseWriter, request *http.Request) {
-		fmt.Fprint(response, "Telepathy Bot is Running")
-	})
-
-	server := http.Server{Addr: ":" + s.port, Handler: mux}
-	go server.ListenAndServe()
+	//Start Webhook handling server
+	logrus.WithField("module", "session").Info("starting web server")
+	go s.WebServer.ListenAndServe()
 
 	// Wait here until the session is Done
 	<-ctx.Done()
@@ -97,7 +95,7 @@ func (s *Session) Start(ctx context.Context) {
 
 	// Shutdown Http server
 	timeout, stop := context.WithTimeout(context.Background(), 5*time.Second)
-	err := server.Shutdown(timeout)
+	err := s.WebServer.Shutdown(timeout)
 	stop()
 	if err != nil {
 		logrus.Errorf("failed to shutdown httpserver: %s", err.Error())

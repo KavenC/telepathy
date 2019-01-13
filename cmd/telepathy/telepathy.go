@@ -7,9 +7,9 @@ import (
 	"syscall"
 
 	"github.com/sirupsen/logrus"
-	_ "gitlab.com/kavenc/telepathy/internal/pkg/discord"
+	"gitlab.com/kavenc/telepathy/internal/pkg/discord"
 	_ "gitlab.com/kavenc/telepathy/internal/pkg/fwd"
-	_ "gitlab.com/kavenc/telepathy/internal/pkg/line"
+	"gitlab.com/kavenc/telepathy/internal/pkg/line"
 	_ "gitlab.com/kavenc/telepathy/internal/pkg/plurkrss"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
@@ -19,11 +19,20 @@ func main() {
 	logrus.SetFormatter(&logrus.TextFormatter{ForceColors: true})
 
 	config := telepathy.SessionConfig{
-		Port:         os.Getenv("PORT"),
-		RedisURL:     os.Getenv("REDIS_URL"),
-		MongoURL:     os.Getenv("MONGODB_URL"),
-		DatabaseName: os.Getenv("MONGODB_NAME"),
+		Port:                 os.Getenv("PORT"),
+		RedisURL:             os.Getenv("REDIS_URL"),
+		MongoURL:             os.Getenv("MONGODB_URL"),
+		DatabaseName:         os.Getenv("MONGODB_NAME"),
+		MessengerConfigTable: make(map[string]telepathy.MessengerConfig),
 	}
+
+	// Setup Messenger Configs
+	config.MessengerConfigTable[line.ID] = make(telepathy.MessengerConfig)
+	config.MessengerConfigTable[line.ID]["SECRET"] = os.Getenv("LINE_CHANNEL_SECRET")
+	config.MessengerConfigTable[line.ID]["TOKEN"] = os.Getenv("LINE_CHANNEL_TOKEN")
+	config.MessengerConfigTable[discord.ID] = make(telepathy.MessengerConfig)
+	config.MessengerConfigTable[discord.ID]["BOT_TOKEN"] = os.Getenv("DISCORD_BOT_TOKEN")
+
 	session, err := telepathy.NewSession(config)
 	if err != nil {
 		logrus.Panic(err)

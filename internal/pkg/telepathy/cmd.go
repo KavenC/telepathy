@@ -9,10 +9,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type cmdManager struct {
+	session *Session
+	rootCmd *cobra.Command
+	logger  *logrus.Entry
+}
+
 // CmdExtraArgs defines the extra arguments passed to Command.Run callbacks
 // All Command.Run callbacks must call ParseExtraCmdArgs to get these data
 type CmdExtraArgs struct {
-	Session *Session
 	Ctx     context.Context
 	Message *InboundMessage
 }
@@ -25,16 +30,15 @@ type CmdExistsError struct {
 // CommandPrefix is the trigger word for the Telepathy command message
 const CommandPrefix = "teru"
 
-var rootCmd = &cobra.Command{
-	Use:                   CommandPrefix,
-	DisableFlagsInUseLine: true,
-	Args:                  cobra.MinimumNArgs(1),
-	Run: func(*cobra.Command, []string, ...interface{}) {
-		// Do nothing
-	},
-}
-
-func init() {
+func rootCmd() *cobra.Command {
+	rootCmd := &cobra.Command{
+		Use:                   CommandPrefix,
+		DisableFlagsInUseLine: true,
+		Args:                  cobra.MinimumNArgs(1),
+		Run: func(*cobra.Command, []string, ...interface{}) {
+			// Do nothing
+		},
+	}
 	rootCmd.Flags().BoolP("help", "h", false, "Show help for telepathy messenger commands")
 	rootCmd.SetHelpTemplate(`== Telepathy messenger command interface ==
 {{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
@@ -62,59 +66,64 @@ func init() {
 
 Send "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
 `)
+	return rootCmd
 }
 
 func (e CmdExistsError) Error() string {
 	return e.Cmd + " already exists."
 }
 
+func newCmdManager(s *Session) *cmdManager {
+	return &cmdManager{
+		session: s,
+		rootCmd: rootCmd(),
+		logger:  logrus.WithField("module", "cmdManager"),
+	}
+}
+
 // RegisterCommand register a subcommand in telepathy command tree
-func RegisterCommand(cmd *cobra.Command) error {
-	logger := logrus.WithFields(logrus.Fields{
-		"module":  "cmd",
-		"command": cmd.Use})
-	subcmds := rootCmd.Commands()
+func (m *cmdManager) RegisterCommand(cmd *cobra.Command) error {
+	subcmds := m.rootCmd.Commands()
 	for _, subcmd := range subcmds {
 		if subcmd.Use == cmd.Use {
-			logger.Error("registered multiple times")
+			m.logger.Errorf("command: %s has already been registered", cmd.Use)
 			return CmdExistsError{Cmd: cmd.Use}
 		}
 	}
-	rootCmd.AddCommand(cmd)
-	logger.Info("registered")
+	m.rootCmd.AddCommand(cmd)
+	m.logger.Infof("registered command: %s", cmd.Use)
 	return nil
 }
 
-// NewCmdExtraArgs parse extra command arguments for the Command.Run callbacks
-func NewCmdExtraArgs(extras ...interface{}) *CmdExtraArgs {
-	logger := logrus.WithFields(logrus.Fields{
-		"module": "cmd",
-		"func":   "NewCmdExtraArgs",
-	})
+func (m *cmdManager) handleCmdMsg(ctx context.Context, message *InboundMessage) {
+	// Got a command message
+	// Parse it with command interface
+	args := regexp.MustCompile(" +").Split(message.Text, -1)[1:]
 
-	if len(extras) != 3 {
-		logger.Panic("incorrect number of arguments in command handler")
-	}
+	m.rootCmd.SetArgs(args)
+	var buffer strings.Builder
+	m.rootCmd.SetOutput(&buffer)
 
-	ctx, ctxok := extras[0].(context.Context)
-	session, sesok := extras[1].(*Session)
-	message, msgok := extras[2].(*InboundMessage)
-	if !ctxok || !msgok || !sesok {
-		logger.Panicf("invalid argument type in command handler: %T, %T, %T",
-			extras[0],
-			extras[1],
-			extras[2])
-	}
-
-	return &CmdExtraArgs{
-		Session: session,
+	// Execute command
+	extraArgs := CmdExtraArgs{
 		Ctx:     ctx,
 		Message: message,
+	}
+	m.rootCmd.Execute(extraArgs)
+
+	// If there is some stirng output, forward it back to user
+	if buffer.Len() > 0 {
+		replyMsg := &OutboundMessage{
+			TargetID: message.FromChannel.ChannelID,
+			Text:     buffer.String(),
+		}
+		msg, _ := m.session.Message.Messenger(message.FromChannel.MessengerID)
+		msg.Send(replyMsg)
 	}
 }
 
 // CommandEnsureDM checks if command is from direct message
-func CommandEnsureDM(cmd *cobra.Command, extraArgs *CmdExtraArgs) bool {
+func CommandEnsureDM(cmd *cobra.Command, extraArgs CmdExtraArgs) bool {
 	if !extraArgs.Message.IsDirectMessage {
 		cmd.Print("This command can only be run with Direct Messages (Whispers).")
 		return false
@@ -124,27 +133,4 @@ func CommandEnsureDM(cmd *cobra.Command, extraArgs *CmdExtraArgs) bool {
 
 func isCmdMsg(text string) bool {
 	return strings.HasPrefix(text, CommandPrefix+" ")
-}
-
-func handleCmdMsg(ctx context.Context, session *Session, message *InboundMessage) {
-	// Got a command message
-	// Parse it with command interface
-	args := regexp.MustCompile(" +").Split(message.Text, -1)[1:]
-
-	rootCmd.SetArgs(args)
-	var buffer strings.Builder
-	rootCmd.SetOutput(&buffer)
-
-	// Execute command
-	rootCmd.Execute(ctx, session, message)
-
-	// If there is some stirng output, forward it back to user
-	if buffer.Len() > 0 {
-		replyMsg := &OutboundMessage{
-			TargetID: message.FromChannel.ChannelID,
-			Text:     buffer.String(),
-		}
-		msg, _ := session.Msgr.Messenger(message.FromChannel.MessengerID)
-		msg.Send(replyMsg)
-	}
 }

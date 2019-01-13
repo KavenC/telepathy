@@ -1,6 +1,7 @@
 package telepathy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +11,11 @@ import (
 )
 
 const channelDelimiter = "@"
+const channelServiceID = "telepathy.channel"
+
+type channelService struct {
+	ServicePlugin
+}
 
 // Channel is an abstract type for a communication session of a messenger APP
 type Channel struct {
@@ -17,7 +23,19 @@ type Channel struct {
 	ChannelID   string
 }
 
-func init() {
+func newChannelService(*ServiceCtorParam) (Service, error) {
+	return &channelService{}, nil
+}
+
+func (c *channelService) Start(context context.Context) {
+	return
+}
+
+func (c *channelService) ID() string {
+	return channelServiceID
+}
+
+func (c *channelService) CommandInterface() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "channel",
 		Short: "Telepathy channel management",
@@ -32,11 +50,16 @@ func init() {
 		Run:   cmdChannelName,
 	})
 
-	RegisterCommand(cmd)
+	return cmd
 }
 
 func cmdChannelName(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := NewCmdExtraArgs(extras...)
+	extraArgs, ok := extras[0].(CmdExtraArgs)
+	if !ok {
+		logrus.WithField("module", "channel").Errorf("failed to parse extraArgs: %T", extras[0])
+		cmd.Print("Internal error. Command failed.")
+		return
+	}
 	cmd.Print(extraArgs.Message.FromChannel.Name())
 }
 

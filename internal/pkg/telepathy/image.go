@@ -39,7 +39,6 @@ func NewImage(content ByteContent) *Image {
 // Image will be uploaded to CDN and generates a URL
 func (img *Image) FullURL() (string, error) {
 	if img.fullURL == "" {
-		img.logger.Info("start uploading to imgur")
 		var err error
 		img.fullURL, err = uploadImage(&img.ByteContent)
 		if err != nil {

@@ -6,49 +6,50 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/mongodb/mongo-go-driver/bson"
+	"github.com/sirupsen/logrus"
 
+	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/mongodb/mongo-go-driver/mongo/replaceopt"
+
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
+
+const dbTableName = "fwdtable"
 
 type channelList map[telepathy.Channel]bool
 
 type forwardingManager struct {
+	telepathy.ServicePlugin
 	session *telepathy.Session
 	sync.Mutex
-	table *sync.Map
+	table   *sync.Map
+	context context.Context
+	logger  *logrus.Entry
 }
 
 func init() {
-	telepathy.RegisterMessageHandler(msgHandler)
-	telepathy.RegisterResource(funcKey, resourceCtor)
+	telepathy.RegisterService(funcKey, ctor)
 }
 
-func resourceCtor(s *telepathy.Session) (interface{}, error) {
+func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
 	manager := &forwardingManager{
-		session: s,
+		session: param.Session,
+		logger:  param.Logger,
 		table:   &sync.Map{},
 	}
-	<-manager.loadFromDB()
+	manager.session.Message.RegisterMessageHandler(manager.msgHandler)
 	return manager, nil
 }
 
-func manager(s *telepathy.Session) *forwardingManager {
-	load, ok := s.Resrc.Load(funcKey)
-	if !ok {
-		logger.Error("failed to load manager")
-		return &forwardingManager{table: &sync.Map{}}
-	}
-	ret, ok := load.(*forwardingManager)
-	if !ok {
-		logger.Errorf("resource type error: %v", load)
-		// Return a dummy manager to keeps things going
-		// But it wont work well for sure
-		return &forwardingManager{table: &sync.Map{}}
-	}
-	return ret
+func (m *forwardingManager) Start(context context.Context) {
+	m.context = context
+	// Load forwarding table from DB
+	<-m.loadFromDB()
+}
+
+func (m *forwardingManager) ID() string {
+	return funcKey
 }
 
 func createFwdNoLock(from, to *telepathy.Channel, target *sync.Map) bool {
@@ -62,7 +63,6 @@ func createFwdNoLock(from, to *telepathy.Channel, target *sync.Map) bool {
 		existsToList[*to] = true
 		target.Store(*from, existsToList)
 	}
-	logger.Infof("Fwd Created: %s -> %s", from.Name(), to.Name())
 	return true
 }
 
@@ -108,6 +108,27 @@ func bsonToTable(doc *bson.Document) *sync.Map {
 	return table
 }
 
+func (m *forwardingManager) msgHandler(ctx context.Context, message telepathy.InboundMessage) {
+	toChList := m.forwardingTo(message.FromChannel)
+	if toChList != nil {
+		text := fmt.Sprintf("**[ %s | %s ]**\n%s",
+			message.FromChannel.MessengerID,
+			message.SourceProfile.DisplayName,
+			message.Text)
+		for toCh := range toChList {
+			outMsg := &telepathy.OutboundMessage{
+				TargetID: toCh.ChannelID,
+				Image:    message.Image,
+			}
+			if len(message.Text) != 0 || message.Image != nil {
+				outMsg.Text = text
+			}
+			msgr, _ := m.session.Message.Messenger(toCh.MessengerID)
+			msgr.Send(outMsg)
+		}
+	}
+}
+
 func (m *forwardingManager) createForwarding(from, to telepathy.Channel) bool {
 	m.Lock()
 	defer m.Unlock()
@@ -125,7 +146,6 @@ func (m *forwardingManager) removeForwarding(from, to telepathy.Channel) bool {
 	if toList[to] {
 		delete(toList, to)
 		m.table.Store(from, toList)
-		logger.Infof("Fwd Deleted: %s -> %s", from.Name(), to.Name())
 		return true
 	}
 	return false
@@ -161,17 +181,14 @@ func (m *forwardingManager) writeToDB() chan interface{} {
 	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
-			logger := logger.WithField("phase", "db")
-			logger.Info("Start write-back to DB")
 			collection := db.Collection(funcKey)
 			doc := tableToBSON(m.table)
 			result, err := collection.ReplaceOne(ctx,
-				map[string]string{"type": "fwdtable"}, doc,
+				map[string]string{"type": dbTableName}, doc,
 				replaceopt.Upsert(true))
 			if err != nil {
-				logger.Error("Error when write-back to DB: " + err.Error())
+				m.logger.Error("error when writing table back to DB: " + err.Error())
 			}
-			logger.Infof("write-back to DB, Done: result=%v", result)
 			return result
 		},
 		Return: retCh,
@@ -183,45 +200,21 @@ func (m *forwardingManager) loadFromDB() chan interface{} {
 	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
-			logger := logger.WithField("phase", "db")
-			logger.Info("Start loading from DB")
 			collection := db.Collection(funcKey)
 			m.Lock()
 			defer m.Unlock()
-			result := collection.FindOne(ctx, map[string]string{"type": "fwdtable"})
+			result := collection.FindOne(ctx, map[string]string{"type": dbTableName})
 			doc := bson.NewDocument()
 			err := result.Decode(doc)
 			if err != nil {
-				logger.Error("Error when load from DB: " + err.Error())
+				m.logger.Error("error when loading table from DB: " + err.Error())
 			} else {
 				m.table = bsonToTable(doc)
 			}
-			logger.Info("load from DB, Done")
+			m.logger.Info("load from DB done")
 			return result
 		},
 		Return: retCh,
 	})
 	return retCh
-}
-
-func msgHandler(ctx context.Context, t *telepathy.Session, message telepathy.InboundMessage) {
-	manager := manager(t)
-	toChList := manager.forwardingTo(message.FromChannel)
-	if toChList != nil {
-		text := fmt.Sprintf("**[ %s | %s ]**\n%s",
-			message.FromChannel.MessengerID,
-			message.SourceProfile.DisplayName,
-			message.Text)
-		for toCh := range toChList {
-			outMsg := &telepathy.OutboundMessage{
-				TargetID: toCh.ChannelID,
-				Image:    message.Image,
-			}
-			if len(message.Text) != 0 || message.Image != nil {
-				outMsg.Text = text
-			}
-			msgr, _ := t.Msgr.Messenger(toCh.MessengerID)
-			msgr.Send(outMsg)
-		}
-	}
 }

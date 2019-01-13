@@ -12,6 +12,7 @@ import (
 	"gitlab.com/kavenc/telepathy/internal/pkg/line"
 	_ "gitlab.com/kavenc/telepathy/internal/pkg/plurkrss"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
+	_ "gitlab.com/kavenc/telepathy/internal/pkg/twitch"
 )
 
 func main() {

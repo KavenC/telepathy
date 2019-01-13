@@ -12,7 +12,7 @@ import (
 	"gitlab.com/kavenc/telepathy/internal/pkg/line"
 	_ "gitlab.com/kavenc/telepathy/internal/pkg/plurkrss"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
-	_ "gitlab.com/kavenc/telepathy/internal/pkg/twitch"
+	"gitlab.com/kavenc/telepathy/internal/pkg/twitch"
 )
 
 func main() {
@@ -34,6 +34,10 @@ func main() {
 	config.MessengerConfigTable[line.ID]["TOKEN"] = os.Getenv("LINE_CHANNEL_TOKEN")
 	config.MessengerConfigTable[discord.ID] = make(telepathy.PluginConfig)
 	config.MessengerConfigTable[discord.ID]["BOT_TOKEN"] = os.Getenv("DISCORD_BOT_TOKEN")
+
+	// Setup Service Configs
+	config.ServiceConfigTable[twitch.ID] = make(telepathy.PluginConfig)
+	config.ServiceConfigTable[twitch.ID]["CLIENT_ID"] = os.Getenv("TWITCH_CLIENT_ID")
 
 	session, err := telepathy.NewSession(config)
 	if err != nil {

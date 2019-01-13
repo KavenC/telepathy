@@ -43,7 +43,6 @@ func newRedisHandle(redisurl string) (*redisHandle, error) {
 }
 
 func (r *redisHandle) start(ctx context.Context) {
-	r.logger.Info("starting")
 	if err := r.client.Ping().Err(); err != nil {
 		r.logger.Errorf("ping failed: %s", err.Error())
 		return
@@ -53,7 +52,7 @@ func (r *redisHandle) start(ctx context.Context) {
 		r.logger.Errorf("failed to flush all:: %s", err.Error())
 	}
 
-	r.logger.Info("waiting for request")
+	r.logger.Info("conneted to Redis.")
 	for {
 		select {
 		case <-ctx.Done():

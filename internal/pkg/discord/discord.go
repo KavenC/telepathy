@@ -1,10 +1,13 @@
+// Package discord implements the Messenger handler of Discord for Telepathy framework.
+// Needed configs:
+// - BOT_TOKEN: A valid discord bot token. For more information, please refer
+//              to https://discordapp.com/developers/applications/me
 package discord
 
 import (
 	"bytes"
 	"context"
 	"net/http"
-	"os"
 	"path"
 	"strings"
 
@@ -13,12 +16,16 @@ import (
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
-const name = "DISCORD"
+// ID is a unique string to identify this Messenger handler
+const ID = "DISCORD"
 
 type messenger struct {
-	*telepathy.MsgrCtorParam
-	ctx context.Context
-	bot *discordgo.Session
+	telepathy.MessengerPlugin
+	session *telepathy.Session
+	handler telepathy.InboundMsgHandler
+	ctx     context.Context
+	bot     *discordgo.Session
+	logger  *logrus.Entry
 }
 
 // InitError indicates an error when initializing Discord messenger handler
@@ -27,7 +34,7 @@ type InitError struct {
 }
 
 func init() {
-	telepathy.RegisterMessenger(name, new)
+	telepathy.RegisterMessenger(ID, new)
 }
 
 func (e InitError) Error() string {
@@ -36,29 +43,40 @@ func (e InitError) Error() string {
 
 func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
 	msgr := messenger{
-		MsgrCtorParam: param,
+		session: param.Session,
+		handler: param.MsgHandler,
+		logger:  param.Logger,
 	}
 
 	var err error
-	msgr.bot, err = discordgo.New("Bot " + os.Getenv("DISCORD_BOT_TOKEN"))
+	config, ok := param.Config["BOT_TOKEN"]
+	if !ok {
+		return nil, InitError{msg: "config: BOT_TOKEN not found"}
+	}
+
+	token, ok := config.(string)
+	if !ok {
+		return nil, InitError{msg: "invalid config: BOT_TOKEN"}
+	}
+
+	msgr.bot, err = discordgo.New("Bot " + token)
 	if err != nil {
-		msgr.Logger.Errorf("init failed: %s", err.Error())
 		return nil, InitError{msg: err.Error()}
 	}
 
-	msgr.bot.AddHandler(msgr.handler)
+	msgr.bot.AddHandler(msgr.msgHandler)
 	return &msgr, nil
 }
 
-func (m *messenger) Name() string {
-	return name
+func (m *messenger) ID() string {
+	return ID
 }
 
 func (m *messenger) Start(ctx context.Context) {
 	// Open a websocket connection to Discord and begin listening.
 	err := m.bot.Open()
 	if err != nil {
-		m.Logger.Errorf("open websocket connection failed: %s", err.Error())
+		m.logger.Errorf("open websocket connection failed: %s", err.Error())
 		return
 	}
 
@@ -67,12 +85,12 @@ func (m *messenger) Start(ctx context.Context) {
 	// Run until being cancelled
 	<-ctx.Done()
 
-	m.Logger.Info("terminating")
+	m.logger.Info("terminating")
 	// Cleanly close down the Discord session.
 	err = m.bot.Close()
 
 	if err != nil {
-		m.Logger.Errorf("error when closing: %s", err.Error())
+		m.logger.Errorf("error when closing: %s", err.Error())
 	}
 }
 
@@ -97,7 +115,7 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 	}
 
 	if err != nil {
-		m.Logger.Error("msg send failed: " + err.Error())
+		m.logger.Error("msg send failed: " + err.Error())
 	}
 }
 
@@ -122,7 +140,7 @@ func createImgContent(att *discordgo.MessageAttachment, logger *logrus.Entry) *t
 	return &content
 }
 
-func (m *messenger) handler(_ *discordgo.Session, dgmessage *discordgo.MessageCreate) {
+func (m *messenger) msgHandler(_ *discordgo.Session, dgmessage *discordgo.MessageCreate) {
 	// Ignore all messages created by the bot itself
 	if dgmessage.Author.ID == m.bot.State.User.ID {
 		return
@@ -130,7 +148,7 @@ func (m *messenger) handler(_ *discordgo.Session, dgmessage *discordgo.MessageCr
 
 	message := telepathy.InboundMessage{
 		FromChannel: telepathy.Channel{
-			MessengerID: m.Name(),
+			MessengerID: m.ID(),
 			ChannelID:   dgmessage.ChannelID,
 		},
 		SourceProfile: &telepathy.MsgrUserProfile{
@@ -143,7 +161,7 @@ func (m *messenger) handler(_ *discordgo.Session, dgmessage *discordgo.MessageCr
 	if len(dgmessage.Attachments) > 0 {
 		// Widht > 0 && Height > 0 indicates that this is a image file
 		if att := dgmessage.Attachments[0]; att.Height > 0 && att.Width > 0 {
-			content := createImgContent(att, m.Logger)
+			content := createImgContent(att, m.logger)
 			if content != nil {
 				message.Image = telepathy.NewImage(*content)
 			}
@@ -152,9 +170,9 @@ func (m *messenger) handler(_ *discordgo.Session, dgmessage *discordgo.MessageCr
 
 	channel, err := m.bot.Channel(dgmessage.ChannelID)
 	if err != nil {
-		m.Logger.Error("get channel fail: " + err.Error())
+		m.logger.Error("get channel fail: " + err.Error())
 	}
 	message.IsDirectMessage = channel.Type == discordgo.ChannelTypeDM
 
-	m.MsgHandler(m.ctx, m.MsgrCtorParam.Session, message)
+	m.handler(m.ctx, message)
 }

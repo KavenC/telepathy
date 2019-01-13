@@ -31,29 +31,26 @@ func newDatabaseHandler(mongourl string, dbname string) (*databaseHandler, error
 	var err error
 	handler.client, err = mongo.NewClient(mongourl)
 	if err != nil {
-		logger.Error("fail to create mongo client")
+		logger.Error("failed to create mongo client")
 		return nil, err
 	}
 	handler.reqQueue = make(chan *DatabaseRequest)
 	handler.logger = logger
-	logger.Info("created database handler")
+	logger.Info("created database handler: Mongo")
 	return &handler, nil
 }
 
 func (h *databaseHandler) start(ctx context.Context) {
-	h.logger.Info("starting")
 	timeCtx, cancel := context.WithTimeout(ctx, time.Minute)
-	h.logger.Info("connecting to MongoDB")
 	err := h.client.Connect(timeCtx)
 	cancel()
 	if err != nil {
-		h.logger.Errorf("connect failed: %s", err.Error())
+		h.logger.Errorf("failed to connect to MongoDB: %s", err.Error())
 		return
 	}
-	h.logger.Info("using database name: " + h.dbName)
 	h.database = h.client.Database(h.dbName)
 
-	h.logger.Info("waiting for request")
+	h.logger.Infof("connected to MongoDB. Database name: %s", h.dbName)
 	for {
 		select {
 		case <-ctx.Done():

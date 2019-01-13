@@ -4,8 +4,14 @@ import (
 	"context"
 	"strings"
 
+	"github.com/KavenC/cobra"
 	"github.com/sirupsen/logrus"
 )
+
+// MessengerConfig is a configuration map which passes to registered
+// constructor of each Messenger handler.
+// The content will be defined by Messenger handlers
+type MessengerConfig map[string]interface{}
 
 // MsgrUserProfile holds the information of a messenger user
 type MsgrUserProfile struct {
@@ -32,137 +38,165 @@ type OutboundMessage struct {
 // GlobalMessenger defines global interfaces of a messenger handler
 // These interfaces will be opened to external modules such as other Messenger handlers
 type GlobalMessenger interface {
-	Name() string
 	Send(*OutboundMessage)
 }
+
+// MessengerPlugin has to be embedded for Messenger plugins
+type MessengerPlugin struct{}
 
 // Messenger defines the interface of a messenger handler
 // Theses interfaces are accessed only by Telepathy framework
 type Messenger interface {
-	Start(context.Context)
+	plugin
 	GlobalMessenger
 }
 
-// MessengerManager manages messenger modules
-type MessengerManager struct {
+// MessageManager manages messenger modules
+type MessageManager struct {
 	messengers map[string]Messenger
+	msgHandler []InboundMsgHandler
 	session    *Session
 }
 
-// MessengerExistsError indicates registering Messenger with a name that already exists in the list
+// MessengerExistsError indicates registering Messenger with a id that already exists in the list
 type MessengerExistsError struct {
-	Name string
+	ID string
 }
 
-// MessengerInvalidError indicates requesting a non-registered Messenger name
+// MessengerInvalidError indicates requesting a non-registered Messenger id
 type MessengerInvalidError struct {
-	Name string
+	ID string
 }
 
-// MessengerIllegalNameError indicates using illegal name to register a msgr handler
-type MessengerIllegalNameError struct {
-	Name string
+// MessengerIllegalIDError indicates using illegal id to register a msgr handler
+type MessengerIllegalIDError struct {
+	ID string
 }
 
 // MsgrCtorParam is the parameter for MessengerCtor
 // This is used to pass framework information to Messenger modules
 type MsgrCtorParam struct {
 	Session    *Session
+	Config     MessengerConfig
 	MsgHandler InboundMsgHandler
 	Logger     *logrus.Entry
 }
 
 // InboundMsgHandler defines the signature of unified inbound message handler
 // Every Messenger implementation should call this function for all received messages
-type InboundMsgHandler func(context.Context, *Session, InboundMessage)
+type InboundMsgHandler func(context.Context, InboundMessage)
 
 // MessengerCtor defines the signature of Messenger module constructor
 // Messenger implementation need to register the constructor to the Telepathy framework
 type MessengerCtor func(*MsgrCtorParam) (Messenger, error)
 
 var msgrCtors map[string]MessengerCtor
-var msgHandler []InboundMsgHandler
 
 func (e MessengerExistsError) Error() string {
-	return "Messenger: " + e.Name + " has already been registered"
+	return "Messenger: " + e.ID + " has already been registered"
 }
 
 func (e MessengerInvalidError) Error() string {
-	return "Messenger: " + e.Name + " does not exist"
+	return "Messenger: " + e.ID + " does not exist"
 }
 
-func (e MessengerIllegalNameError) Error() string {
-	return "Illegal messenger name: " + e.Name
+func (e MessengerIllegalIDError) Error() string {
+	return "Illegal messenger ID: " + e.ID
+}
+
+// CommandInterface returns the command interface of a Messenger
+// The stub here makes it optional to implement this for Messenger plugins
+func (m *MessengerPlugin) CommandInterface() *cobra.Command {
+	return nil
 }
 
 // RegisterMessenger registers a Messenger handler
 func RegisterMessenger(ID string, ctor MessengerCtor) error {
-	logger := logrus.WithField("messenger", ID)
+	logger := logrus.WithField("module", "messageManager").WithField("messenger", ID)
 	if msgrCtors == nil {
 		msgrCtors = make(map[string]MessengerCtor)
 	}
 
 	if strings.Contains(ID, channelDelimiter) {
-		logger.Error("messenger name cannot contain: " + channelDelimiter)
-		return MessengerIllegalNameError{Name: ID}
+		logger.Errorf("illegal messenger ID: %s, containing: "+channelDelimiter, ID)
+		return MessengerIllegalIDError{ID: ID}
 	}
 
 	if msgrCtors[ID] != nil {
-		logger.Error("registered multiple times")
-		return MessengerExistsError{Name: ID}
+		logger.Errorf("already registered: %s", ID)
+		return MessengerExistsError{ID: ID}
 	}
 
-	logger.Info("registered")
 	msgrCtors[ID] = ctor
+	logger.Infof("registered messenger: %s", ID)
 	return nil
 }
 
-// RegisterMessageHandler register a InboundMsgHandler
-// The callback will be called when receiving messages from any Messenger
-func RegisterMessageHandler(handler InboundMsgHandler) {
-	msgHandler = append(msgHandler, handler)
-}
-
-func newMessengerManager(session *Session) *MessengerManager {
-	logger := logrus.WithField("module", "messenger")
-	manager := MessengerManager{
+func newMessageManager(session *Session, configTable *map[string]MessengerConfig) *MessageManager {
+	logger := logrus.WithField("module", "messageManager")
+	manager := MessageManager{
 		messengers: make(map[string]Messenger),
 		session:    session,
 	}
 	param := MsgrCtorParam{
 		Session:    session,
-		MsgHandler: rootMsgHandler,
+		MsgHandler: manager.rootMsgHandler,
 	}
-	var err error
 
 	for ID, ctor := range msgrCtors {
 		param := param
 		param.Logger = logrus.WithField("messenger", ID)
-		manager.messengers[ID], err = ctor(&param)
+		config, configExists := (*configTable)[ID]
+		if !configExists {
+			logger.WithField("messenger", ID).Warnf("config for %s does not exist", ID)
+		}
+		param.Config = config
+		messenger, err := ctor(&param)
 		if err != nil {
-			logger.Errorf("failed to construct %s: %s", ID, err.Error())
+			logger.WithField("messenger", ID).Errorf("failed to construct: %s", err.Error())
 			continue
 		}
-		logger.Infof("created: %s", ID)
+
+		// Constructucted plugin id must be matching the registered id
+		if ID != messenger.ID() {
+			logger.WithField("messenger", ID).Errorf("regisered ID: %s but created as ID: %s. not constructed.",
+				ID, messenger.ID())
+			continue
+		}
+
+		manager.messengers[ID] = messenger
+
+		// Register command interfaces
+		if cmd := messenger.CommandInterface(); cmd != nil {
+			manager.session.Command.RegisterCommand(cmd)
+		}
+
+		logger.WithField("messenger", ID).Infof("constructed messenger: %s", ID)
 	}
 	return &manager
 }
 
 // Messenger gets a registered messenger handler with ID
-func (m *MessengerManager) Messenger(ID string) (GlobalMessenger, error) {
+func (m *MessageManager) Messenger(ID string) (GlobalMessenger, error) {
 	msg := m.messengers[ID]
 	if msg == nil {
-		return nil, MessengerInvalidError{Name: ID}
+		return nil, MessengerInvalidError{ID: ID}
 	}
 	return msg, nil
 }
 
-func rootMsgHandler(ctx context.Context, session *Session, message InboundMessage) {
+// RegisterMessageHandler register a InboundMsgHandler
+// The callback will be called when receiving messages from any Messenger
+func (m *MessageManager) RegisterMessageHandler(handler InboundMsgHandler) {
+	m.msgHandler = append(m.msgHandler, handler)
+}
+
+func (m *MessageManager) rootMsgHandler(ctx context.Context, message InboundMessage) {
 	if isCmdMsg(message.Text) {
-		handleCmdMsg(ctx, session, &message)
+		m.session.Command.handleCmdMsg(ctx, &message)
 	} else {
-		for _, handler := range msgHandler {
-			handler(ctx, session, message)
+		for _, handler := range m.msgHandler {
+			handler(ctx, message)
 		}
 	}
 }

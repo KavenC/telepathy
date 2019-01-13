@@ -71,7 +71,7 @@ func (e TerminatedError) Error() string {
 	return "Terminated: " + e.Msg
 }
 
-func init() {
+func (m *forwardingManager) CommandInterface() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fwd",
 		Short: "Cross-app Message Forwarding",
@@ -83,19 +83,19 @@ func init() {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "2way",
 		Short: "Create two-way channel forwarding (DM only)",
-		Run:   createTwoWay,
+		Run:   m.createTwoWay,
 	})
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "1way",
 		Short: "Create one-way channel forwarding (DM only)",
-		Run:   createOneWay,
+		Run:   m.createOneWay,
 	})
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "info",
 		Short: "Show message forwarding info (form/to).",
-		Run:   info,
+		Run:   m.info,
 	})
 
 	cmd.AddCommand(&cobra.Command{
@@ -103,7 +103,7 @@ func init() {
 		Example: "del-from LINE(channelId) DISCORD(channelId)",
 		Args:    cobra.MinimumNArgs(1),
 		Short:   "Stop receiving forwarded messages from specified channels",
-		Run:     delFrom,
+		Run:     m.delFrom,
 	})
 
 	cmd.AddCommand(&cobra.Command{
@@ -111,7 +111,7 @@ func init() {
 		Example: "del-to LINE(channelId) DISCORD(channelId)",
 		Args:    cobra.MinimumNArgs(1),
 		Short:   "Stop forwarding messages to specified channels",
-		Run:     delTo,
+		Run:     m.delTo,
 	})
 
 	cmd.AddCommand(&cobra.Command{
@@ -119,10 +119,10 @@ func init() {
 		Example: "set [key]",
 		Short:   "Used for identify channels various channel features.",
 		Args:    cobra.ExactArgs(1),
-		Run:     set,
+		Run:     m.set,
 	})
 
-	telepathy.RegisterCommand(cmd)
+	return cmd
 }
 
 func allocate3Keys(redis *redis.Client) interface{} {
@@ -167,11 +167,11 @@ func allocate3Keys(redis *redis.Client) interface{} {
 	return ret
 }
 
-func initSession(ctx context.Context, session *Session, t *telepathy.Session) (string, string, error) {
+func (m *forwardingManager) initSession(ctx context.Context, session *Session) (string, string, error) {
 	logger := logger.WithField("phase", "initSession")
 	// Allocate 3 keys in redis
 	redisRetChannel := make(chan interface{})
-	t.Redis.PushRequest(&telepathy.RedisRequest{
+	m.session.Redis.PushRequest(&telepathy.RedisRequest{
 		Action: allocate3Keys,
 		Return: redisRetChannel,
 	})
@@ -226,7 +226,7 @@ func initSession(ctx context.Context, session *Session, t *telepathy.Session) (s
 		return "", "", InternalError{Msg: err.Error()}
 	}
 	redisSetRet := make(chan interface{})
-	t.Redis.PushRequest(&telepathy.RedisRequest{
+	m.session.Redis.PushRequest(&telepathy.RedisRequest{
 		Action: func(redis *redis.Client) interface{} {
 			expire := time.Minute
 			internalErr := InternalError{Msg: "Redis key lost"}
@@ -268,8 +268,8 @@ func initSession(ctx context.Context, session *Session, t *telepathy.Session) (s
 	return redisRet.keys[1], redisRet.keys[2], nil
 }
 
-func setupFwd(cmd *cobra.Command, session *Session, extraArgs *telepathy.CmdExtraArgs) {
-	key1, key2, err := initSession(extraArgs.Ctx, session, extraArgs.Session)
+func (m *forwardingManager) setupFwd(cmd *cobra.Command, session *Session, extraArgs telepathy.CmdExtraArgs) {
+	key1, key2, err := m.initSession(extraArgs.Ctx, session)
 	prefix := telepathy.CommandPrefix
 
 	if err != nil {
@@ -282,8 +282,13 @@ func setupFwd(cmd *cobra.Command, session *Session, extraArgs *telepathy.CmdExtr
 	}
 }
 
-func createTwoWay(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.NewCmdExtraArgs(extras...)
+func (m *forwardingManager) createTwoWay(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
+		cmd.Print("Internal error. Command failed.")
+		return
+	}
 
 	if !telepathy.CommandEnsureDM(cmd, extraArgs) {
 		return
@@ -295,11 +300,16 @@ func createTwoWay(cmd *cobra.Command, args []string, extras ...interface{}) {
 	}
 
 	cmd.Print("Setup two-way channel forwarding in following steps:")
-	setupFwd(cmd, &session, extraArgs)
+	m.setupFwd(cmd, &session, extraArgs)
 }
 
-func createOneWay(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.NewCmdExtraArgs(extras...)
+func (m *forwardingManager) createOneWay(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
+		cmd.Print("Internal error. Command failed.")
+		return
+	}
 
 	if !telepathy.CommandEnsureDM(cmd, extraArgs) {
 		return
@@ -311,14 +321,18 @@ func createOneWay(cmd *cobra.Command, args []string, extras ...interface{}) {
 	}
 
 	cmd.Print("Setup one-way channel forwarding in following steps:")
-	setupFwd(cmd, &session, extraArgs)
+	m.setupFwd(cmd, &session, extraArgs)
 }
 
-func info(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.NewCmdExtraArgs(extras...)
+func (m *forwardingManager) info(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
+		cmd.Print("Internal error. Command failed.")
+		return
+	}
 
-	manager := manager(extraArgs.Session)
-	toChList := manager.forwardingTo(extraArgs.Message.FromChannel)
+	toChList := m.forwardingTo(extraArgs.Message.FromChannel)
 	if toChList != nil {
 		cmd.Print("= Messages are forwarding to:")
 		for toCh := range toChList {
@@ -326,7 +340,7 @@ func info(cmd *cobra.Command, args []string, extras ...interface{}) {
 		}
 	}
 
-	fromChList := manager.forwardingFrom(extraArgs.Message.FromChannel)
+	fromChList := m.forwardingFrom(extraArgs.Message.FromChannel)
 	if fromChList != nil {
 		cmd.Print("\n\n= Receiving forwarded messages from:")
 		for fromCh := range fromChList {
@@ -339,9 +353,8 @@ func info(cmd *cobra.Command, args []string, extras ...interface{}) {
 	}
 }
 
-func createFwd(from, to, this *telepathy.Channel, s *telepathy.Session) string {
-	fwd := manager(s)
-	ok := fwd.createForwarding(*from, *to)
+func (m *forwardingManager) createFwd(from, to, this *telepathy.Channel) string {
+	ok := m.createForwarding(*from, *to)
 	var ret string
 
 	if !ok {
@@ -355,19 +368,19 @@ func createFwd(from, to, this *telepathy.Channel, s *telepathy.Session) string {
 		ret = fromMsg
 		outMsg.Text = toMsg
 		outMsg.TargetID = to.ChannelID
-		msgrHandler, _ = s.Msgr.Messenger(to.MessengerID)
+		msgrHandler, _ = m.session.Message.Messenger(to.MessengerID)
 	} else {
 		ret = toMsg
 		outMsg.Text = fromMsg
 		outMsg.TargetID = from.ChannelID
-		msgrHandler, _ = s.Msgr.Messenger(from.MessengerID)
+		msgrHandler, _ = m.session.Message.Messenger(from.MessengerID)
 	}
 	msgrHandler.Send(outMsg)
 
 	return ret
 }
 
-func setKeyProcess(key, cid, msg string, s *telepathy.Session) func(*redis.Client) interface{} {
+func (m *forwardingManager) setKeyProcess(key, cid, msg string) func(*redis.Client) interface{} {
 	// Construct the Redis request action function
 	// String returned by Action function should be used as command reply
 	return func(client *redis.Client) interface{} {
@@ -471,7 +484,7 @@ func setKeyProcess(key, cid, msg string, s *telepathy.Session) func(*redis.Clien
 					"second_type":    session.SecondType,
 					"second_channel": session.SecondID,
 				}).Info("Creating one-way forwarding")
-				ret += createFwd(fch, sch, tch, s)
+				ret += m.createFwd(fch, sch, tch)
 			case twoWay:
 				logger.WithFields(logrus.Fields{
 					"first_type":     session.FirstType,
@@ -479,20 +492,25 @@ func setKeyProcess(key, cid, msg string, s *telepathy.Session) func(*redis.Clien
 					"second_type":    session.SecondType,
 					"second_channel": session.SecondID,
 				}).Info("Creating two-way forwarding")
-				ret += createFwd(fch, sch, tch, s)
-				ret += "\n" + createFwd(sch, fch, tch, s)
+				ret += m.createFwd(fch, sch, tch)
+				ret += "\n" + m.createFwd(sch, fch, tch)
 			default:
-				logger.Errorf("Got invalid Cmd in Session: %v", session)
+				logger.Errorf("got invalid Cmd in Session: %v", session)
 				return errUnknown
 			}
-			manager(s).writeToDB()
+			m.writeToDB()
 		}
 		return ret
 	}
 }
 
-func set(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.NewCmdExtraArgs(extras...)
+func (m *forwardingManager) set(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
+		cmd.Print("Internal error. Command failed.")
+		return
+	}
 
 	msg := extraArgs.Message.FromChannel.MessengerID
 	cid := extraArgs.Message.FromChannel.ChannelID
@@ -500,8 +518,8 @@ func set(cmd *cobra.Command, args []string, extras ...interface{}) {
 
 	// Set key in redis
 	redisRet := make(chan interface{})
-	extraArgs.Session.Redis.PushRequest(&telepathy.RedisRequest{
-		Action: setKeyProcess(key, cid, msg, extraArgs.Session),
+	m.session.Redis.PushRequest(&telepathy.RedisRequest{
+		Action: m.setKeyProcess(key, cid, msg),
 		Return: redisRet,
 	})
 
@@ -517,19 +535,24 @@ func set(cmd *cobra.Command, args []string, extras ...interface{}) {
 	}
 }
 
-func delFrom(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.NewCmdExtraArgs(extras...)
+func (m *forwardingManager) delFrom(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
+		cmd.Print("Internal error. Command failed.")
+		return
+	}
 	thisCh := extraArgs.Message.FromChannel
-	manager := manager(extraArgs.Session)
+
 	change := false
 	for _, fromChName := range args {
 		fromCh := telepathy.NewChannel(fromChName)
-		if !manager.removeForwarding(*fromCh, thisCh) {
+		if !m.removeForwarding(*fromCh, thisCh) {
 			cmd.Printf("Invalid channel: %s\n", fromChName)
 			continue
 		}
 		cmd.Printf("Stop receiving messages from: %s\n", fromChName)
-		messenger, _ := extraArgs.Session.Msgr.Messenger(fromCh.MessengerID)
+		messenger, _ := m.session.Message.Messenger(fromCh.MessengerID)
 		msg := telepathy.OutboundMessage{
 			TargetID: fromCh.ChannelID,
 			Text:     fmt.Sprintf("Message forwarding to: %s has been stopped\n", thisCh.Name()),
@@ -539,23 +562,28 @@ func delFrom(cmd *cobra.Command, args []string, extras ...interface{}) {
 	}
 
 	if change {
-		manager.writeToDB()
+		m.writeToDB()
 	}
 }
 
-func delTo(cmd *cobra.Command, args []string, extras ...interface{}) {
-	extraArgs := telepathy.NewCmdExtraArgs(extras...)
+func (m *forwardingManager) delTo(cmd *cobra.Command, args []string, extras ...interface{}) {
+	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
+		cmd.Print("Internal error. Command failed.")
+		return
+	}
 	thisCh := extraArgs.Message.FromChannel
-	manager := manager(extraArgs.Session)
+
 	change := false
 	for _, toChName := range args {
 		toCh := telepathy.NewChannel(toChName)
-		if !manager.removeForwarding(thisCh, *toCh) {
+		if !m.removeForwarding(thisCh, *toCh) {
 			cmd.Printf("Invalid channel: %s\n", toChName)
 			continue
 		}
 		cmd.Printf("Stop forwarding messages to: %s\n", toChName)
-		messenger, _ := extraArgs.Session.Msgr.Messenger(toCh.MessengerID)
+		messenger, _ := m.session.Message.Messenger(toCh.MessengerID)
 		msg := telepathy.OutboundMessage{
 			TargetID: toCh.ChannelID,
 			Text:     fmt.Sprintf("Message forwarding from: %s has been stopped\n", thisCh.Name()),
@@ -565,6 +593,6 @@ func delTo(cmd *cobra.Command, args []string, extras ...interface{}) {
 	}
 
 	if change {
-		manager.writeToDB()
+		m.writeToDB()
 	}
 }

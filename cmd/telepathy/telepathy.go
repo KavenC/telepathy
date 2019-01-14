@@ -24,14 +24,15 @@ func main() {
 		RedisURL:             os.Getenv("REDIS_URL"),
 		MongoURL:             os.Getenv("MONGODB_URL"),
 		DatabaseName:         os.Getenv("MONGODB_NAME"),
-		MessengerConfigTable: make(map[string]telepathy.MessengerConfig),
+		MessengerConfigTable: make(map[string]telepathy.PluginConfig),
+		ServiceConfigTable:   make(map[string]telepathy.PluginConfig),
 	}
 
 	// Setup Messenger Configs
-	config.MessengerConfigTable[line.ID] = make(telepathy.MessengerConfig)
+	config.MessengerConfigTable[line.ID] = make(telepathy.PluginConfig)
 	config.MessengerConfigTable[line.ID]["SECRET"] = os.Getenv("LINE_CHANNEL_SECRET")
 	config.MessengerConfigTable[line.ID]["TOKEN"] = os.Getenv("LINE_CHANNEL_TOKEN")
-	config.MessengerConfigTable[discord.ID] = make(telepathy.MessengerConfig)
+	config.MessengerConfigTable[discord.ID] = make(telepathy.PluginConfig)
 	config.MessengerConfigTable[discord.ID]["BOT_TOKEN"] = os.Getenv("DISCORD_BOT_TOKEN")
 
 	session, err := telepathy.NewSession(config)

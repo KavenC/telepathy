@@ -7,6 +7,7 @@ import (
 // ServiceCtorParam is the data structured pass to ServiceCtor
 type ServiceCtorParam struct {
 	Session *Session
+	Config  PluginConfig
 	Logger  *logrus.Entry
 }
 
@@ -68,7 +69,7 @@ func RegisterService(ID string, ctor ServiceCtor) error {
 	return nil
 }
 
-func newServiceManager(session *Session) *serviceManager {
+func newServiceManager(session *Session, configTable map[string]PluginConfig) *serviceManager {
 	manager := serviceManager{
 		session:  session,
 		services: make(map[string]Service),
@@ -82,6 +83,11 @@ func newServiceManager(session *Session) *serviceManager {
 	for ID, ctor := range serviceCtors {
 		param := paramBase
 		param.Logger = logrus.WithField("service", ID)
+		config, configExists := configTable[ID]
+		if !configExists {
+			manager.logger.WithField("service", ID).Warnf("config for %s does not exist", ID)
+		}
+		param.Config = config
 		service, err := ctor(&param)
 		if err != nil {
 			manager.logger.WithField("service", ID).Errorf("failed to construct: %s", err.Error())

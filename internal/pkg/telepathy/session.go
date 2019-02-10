@@ -2,6 +2,7 @@ package telepathy
 
 import (
 	"context"
+	"net/url"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -22,6 +23,7 @@ type Session struct {
 type SessionConfig struct {
 	// Infrastructure configs
 	Port         string // Port Number for Webhook handling server
+	RootURL      string // URL to telepathy server
 	RedisURL     string // URL to the Redis server
 	MongoURL     string // URL to the MongoDB Server
 	DatabaseName string // MongoDB database name
@@ -36,6 +38,10 @@ func NewSession(config SessionConfig) (*Session, error) {
 		WebServer: httpServer{},
 	}
 	var err error
+	session.WebServer.uRL, err = url.Parse(config.RootURL)
+	if err != nil {
+		return nil, err
+	}
 
 	// Init redis
 	session.Redis, err = newRedisHandle(config.RedisURL)
@@ -61,8 +67,10 @@ func NewSession(config SessionConfig) (*Session, error) {
 	session.Service = newServiceManager(&session, config.ServiceConfigTable)
 
 	// Init httpServer
-	session.WebServer.init(config.Port)
-
+	err = session.WebServer.init(config.Port)
+	if err != nil {
+		return nil, err
+	}
 	return &session, nil
 }
 

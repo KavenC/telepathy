@@ -5,9 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
+	"net/http"
 	"time"
 )
+
+// UserList maps to json response from twitch
+type UserList struct {
+	Data []User `json:"data"`
+}
 
 // User stores twitch user data
 type User struct {
@@ -23,30 +28,48 @@ type User struct {
 	ViewCount       int    `json:"view_count"`
 }
 
-func (t *twitchAPI) fetchUser(ctx context.Context, idOrLogin interface{},
-	respChan chan<- User, errChan chan<- error) {
-	// Identify parameters
-	options := make(map[string]string)
-	userID, ok := idOrLogin.(int)
-	if ok {
-		options["id"] = strconv.Itoa(userID)
-	} else if login, ok := idOrLogin.(string); ok {
-		options["login"] = login
-	} else {
-		errChan <- errors.New("wrong id/login type")
+func (t *twitchAPI) fetchUser(ctx context.Context, login string,
+	respChan chan<- *User, errChan chan<- error) {
+	req, err := t.newRequest("GET", "users", nil)
+	if err != nil {
+		errChan <- fmt.Errorf("new request failed: %s", err.Error())
 		return
 	}
 
+	query := req.URL.Query()
+	query.Add("login", login)
+	req.URL.RawQuery = query.Encode()
+
+	t.fetchUserImpl(ctx, req, respChan, errChan)
+}
+
+func (t *twitchAPI) fetchUserWithID(ctx context.Context, ID string,
+	respChan chan<- *User, errChan chan<- error) {
+	req, err := t.newRequest("GET", "users", nil)
+	if err != nil {
+		errChan <- fmt.Errorf("new request failed: %s", err.Error())
+		return
+	}
+
+	query := req.URL.Query()
+	query.Add("id", ID)
+	req.URL.RawQuery = query.Encode()
+
+	t.fetchUserImpl(ctx, req, respChan, errChan)
+}
+
+func (t *twitchAPI) fetchUserImpl(ctx context.Context, req *http.Request,
+	respChan chan<- *User, errChan chan<- error) {
 	// Create go routine for http request
-	bodyResp := make(chan []byte, 1)
-	getErr := make(chan error, 1)
+	getResp := make(chan *http.Response)
+	getErr := make(chan error)
 	getCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	t.get(getCtx, "users", options, bodyResp, getErr)
+	go t.sendReq(getCtx, req, getResp, getErr)
 
-	var body []byte
+	var resp *http.Response
 	select {
-	case body = <-bodyResp:
+	case resp = <-getResp:
 		break
 	case err := <-getErr:
 		errChan <- err
@@ -57,21 +80,24 @@ func (t *twitchAPI) fetchUser(ctx context.Context, idOrLogin interface{},
 		return
 	}
 
-	// Unmarshaling the response
-	type UserList struct {
-		Data []User `json:"data"`
+	// Handle response
+	if resp.StatusCode != 200 {
+		errChan <- fmt.Errorf("fetchUser() resp status: %d (ReqURL: %s)", resp.StatusCode, req.URL.String())
+		return
 	}
-	var list UserList
-	err := json.Unmarshal(body, &list)
+
+	decoder := json.NewDecoder(resp.Body)
+	var userList UserList
+	err := decoder.Decode(&userList)
 	if err != nil {
-		errChan <- err
+		errChan <- fmt.Errorf("Resp.Body Read failed: %s", err.Error())
 		return
 	}
 
-	if len(list.Data) == 0 {
-		errChan <- fmt.Errorf("invalid resp.body: %s", string(body))
+	if len(userList.Data) == 0 {
+		respChan <- nil
 		return
 	}
 
-	respChan <- list.Data[0]
+	respChan <- &userList.Data[0]
 }

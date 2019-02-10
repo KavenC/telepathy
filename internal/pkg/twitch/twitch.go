@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
@@ -16,12 +17,19 @@ import (
 // ID is the plugin id
 const ID = "twitch"
 
+const twitchURL = "https://www.twitch.tv/"
+
 type twitchService struct {
 	telepathy.ServicePlugin
-	session *telepathy.Session
-	api     *twitchAPI
-	ctx     context.Context
-	logger  *logrus.Entry
+	session    *telepathy.Session
+	api        *twitchAPI
+	webhookURL *url.URL
+	// webhookSubs: Webhook type -> UserID -> Subsriber channel
+	webhookSubs  map[string]map[string]map[telepathy.Channel]bool
+	streamStatus map[string]bool // UserID -> stream status
+
+	ctx    context.Context
+	logger *logrus.Entry
 }
 
 func init() {
@@ -37,9 +45,11 @@ func newTwitchAPI() *twitchAPI {
 func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
 	// Construct service
 	service := &twitchService{
-		session: param.Session,
-		api:     newTwitchAPI(),
-		logger:  param.Logger,
+		session:      param.Session,
+		api:          newTwitchAPI(),
+		logger:       param.Logger,
+		webhookSubs:  make(map[string]map[string]map[telepathy.Channel]bool),
+		streamStatus: make(map[string]bool),
 	}
 	service.api.logger = service.logger.WithField("phase", "api")
 
@@ -54,44 +64,20 @@ func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
 	}
 
 	// Register Webhook
-	service.session.WebServer.RegisterWebhook("twitch", service.webhook)
+	var err error
+	service.webhookURL, err = service.session.WebServer.RegisterWebhook("twitch", service.webhook)
+	if err != nil {
+		return nil, err
+	}
 
 	return service, nil
 }
 
 func (s *twitchService) Start(ctx context.Context) {
 	s.ctx = ctx
+	<-s.streamChangeLoadFromDB()
 }
 
 func (s *twitchService) ID() string {
 	return ID
-}
-
-func (s *twitchService) webhook(response http.ResponseWriter, req *http.Request) {
-	if req.Method != "POST" {
-		response.WriteHeader(405)
-		return
-	}
-
-	respChan := make(chan int, 1)
-	go s.handleWebhookReq(s.ctx, req, respChan)
-
-	select {
-	case resp := <-respChan:
-		response.WriteHeader(resp)
-		return
-	case <-s.ctx.Done():
-		response.WriteHeader(503)
-		return
-	}
-}
-
-func (s *twitchService) handleWebhookReq(ctx context.Context, req *http.Request, resp chan int) {
-	// TODO: handle unsubscribed callback, resp = 410
-
-	// TODO: Auth
-
-	// Accepted
-	resp <- 200
-
 }

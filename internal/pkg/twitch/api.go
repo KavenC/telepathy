@@ -2,11 +2,10 @@ package twitch
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
-	"strings"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 )
@@ -16,26 +15,19 @@ const apiURL = "https://api.twitch.tv/helix/"
 type twitchAPI struct {
 	clientID      string
 	clientSecret  string
+	websubSecret  string
 	httpTransport *http.Transport
 	httpClient    *http.Client
+	pendingWebSub sync.Map
 	logger        *logrus.Entry
 }
 
-func (t *twitchAPI) get(ctx context.Context, target string, param map[string]string,
-	respChan chan<- []byte, errChan chan<- error) {
-	paramList := make([]string, 0, len(param))
-	for key, value := range param {
-		paramList = append(paramList, fmt.Sprintf("%s=%s", key, value))
-	}
-	paramStr := strings.Join(paramList, "&")
-	url := fmt.Sprintf("%s%s?%s", apiURL, target, paramStr)
+func (t *twitchAPI) newRequest(method, target string, body io.Reader) (*http.Request, error) {
+	return http.NewRequest(method, fmt.Sprintf("%s/%s", apiURL, target), body)
+}
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		errChan <- err
-		return
-	}
-
+func (t *twitchAPI) sendReq(ctx context.Context, req *http.Request,
+	respChan chan<- *http.Response, errChan chan<- error) {
 	req.Header.Add("Client-ID", t.clientID)
 	req = req.WithContext(ctx)
 
@@ -46,21 +38,6 @@ func (t *twitchAPI) get(ctx context.Context, target string, param map[string]str
 		return
 	}
 
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.logger.Errorf("get(%d): %s", resp.StatusCode, url)
-		errChan <- errors.New("HTTP Resp: " + resp.Status)
-		t.httpTransport.CancelRequest(req)
-		return
-	}
-
-	buffer, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		errChan <- err
-		t.httpTransport.CancelRequest(req)
-		return
-	}
-
-	respChan <- buffer
+	respChan <- resp
 	return
 }

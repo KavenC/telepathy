@@ -53,22 +53,26 @@ func (r *redisHandle) start(ctx context.Context) {
 	}
 
 	r.logger.Info("conneted to Redis.")
-	for {
-		select {
-		case <-ctx.Done():
-			r.logger.Info("terminated")
-			err := r.client.Close()
-			if err != nil {
-				r.logger.Errorf("failed to close connection: %s", err.Error())
-			} else {
-				r.logger.Info("connection closed")
+
+	// Queue handling routine
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				r.logger.Info("terminated")
+				err := r.client.Close()
+				if err != nil {
+					r.logger.Errorf("failed to close connection: %s", err.Error())
+				} else {
+					r.logger.Info("connection closed")
+				}
+				return
+			case request := <-r.reqQueue:
+				ret := request.Action(r.client.WithContext(ctx))
+				request.Return <- ret
 			}
-			return
-		case request := <-r.reqQueue:
-			ret := request.Action(r.client.WithContext(ctx))
-			request.Return <- ret
 		}
-	}
+	}()
 }
 
 // PushRequest pushes a new redis request

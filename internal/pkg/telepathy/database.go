@@ -51,24 +51,28 @@ func (h *databaseHandler) start(ctx context.Context) {
 	h.database = h.client.Database(h.dbName)
 
 	h.logger.Infof("connected to MongoDB. Database name: %s", h.dbName)
-	for {
-		select {
-		case <-ctx.Done():
-			h.logger.Info("terminated")
-			timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			err := h.client.Disconnect(timeoutCtx)
-			cancel()
-			if err != nil {
-				h.logger.Errorf("failed to disconnect: %s", err.Error())
-			} else {
-				h.logger.Info("disconnected")
+
+	// Queue handling routine
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				h.logger.Info("terminated")
+				timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				err := h.client.Disconnect(timeoutCtx)
+				cancel()
+				if err != nil {
+					h.logger.Errorf("failed to disconnect: %s", err.Error())
+				} else {
+					h.logger.Info("disconnected")
+				}
+				return
+			case request := <-h.reqQueue:
+				ret := request.Action(ctx, h.database)
+				request.Return <- ret
 			}
-			return
-		case request := <-h.reqQueue:
-			ret := request.Action(ctx, h.database)
-			request.Return <- ret
 		}
-	}
+	}()
 }
 
 // PushRequest pushes a new database request

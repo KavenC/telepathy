@@ -2,31 +2,25 @@ package plurkrss
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
-	"sync"
+	"reflect"
 	"time"
 
+	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/sirupsen/logrus"
 
-	"github.com/mongodb/mongo-go-driver/bson"
-	"github.com/mongodb/mongo-go-driver/mongo"
-	"github.com/mongodb/mongo-go-driver/mongo/replaceopt"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
 const timeZone = "Asia/Taipei"
 const dbType = "plurksubtable"
 
-type channelList map[telepathy.Channel]bool
-
 type plurkSubManager struct {
 	telepathy.ServicePlugin
-	sync.Mutex
 	session *telepathy.Session
-	subList *sync.Map
+	subList *telepathy.ChannelListMap
 	context context.Context
 	logger  *logrus.Entry
 }
@@ -38,7 +32,7 @@ func init() {
 func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
 	manager := &plurkSubManager{
 		session: param.Session,
-		subList: &sync.Map{},
+		subList: telepathy.NewChannelListMap(),
 		logger:  param.Logger,
 	}
 	manager.session.WebServer.RegisterWebhook(funcKey, manager.webhook)
@@ -84,7 +78,7 @@ func (m *plurkSubManager) webhook(response http.ResponseWriter, req *http.Reques
 	}
 
 	// If some channels are subscribing this user, send the content to the channels
-	load, ok := m.subList.Load(plurkUser)
+	targets, ok := m.subList.GetList(plurkUser)
 	if !ok {
 		return
 	}
@@ -97,7 +91,6 @@ func (m *plurkSubManager) webhook(response http.ResponseWriter, req *http.Reques
 	}
 
 	// Start sending messages to channels
-	targets := load.(channelList)
 	msgBody := fmt.Sprintf(`[Plurk RSS Feed]
 Author: %s
 Date/Time: %s
@@ -115,56 +108,12 @@ Date/Time: %s
 	}
 }
 
-func tableToBSON(table *sync.Map) *bson.Document {
-	doc := bson.NewDocument(bson.EC.String("type", dbType))
-	table.Range(func(key interface{}, value interface{}) bool {
-		user, _ := key.(string)
-		toList, _ := value.(channelList)
-		bsonToList := bson.NewArray()
-		for to := range toList {
-			bsonToList.Append(bson.VC.String(to.JSON()))
-		}
-		doc.Append(bson.EC.Array(user, bsonToList))
-		return true
-	})
-	return doc
-}
-
-func bsonToTable(doc *bson.Document) *sync.Map {
-	table := &sync.Map{}
-	eleIter := doc.Iterator()
-	for {
-		if !eleIter.Next() {
-			break
-		}
-		element := eleIter.Element()
-		toList, ok := element.Value().MutableArrayOK()
-		if ok {
-			user := element.Key()
-			toIter, _ := toList.Iterator()
-			for {
-				if !toIter.Next() {
-					break
-				}
-				toCh := &telepathy.Channel{}
-				jsonStr := toIter.Value().StringValue()
-				json.Unmarshal([]byte(jsonStr), toCh)
-				createSubNoLock(&user, toCh, table)
-			}
-		}
-	}
-	return table
-}
-
 func (m *plurkSubManager) writeToDB() chan interface{} {
 	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			collection := db.Collection(funcKey)
-			doc := tableToBSON(m.subList)
-			result, err := collection.ReplaceOne(ctx,
-				map[string]string{"type": dbType}, doc,
-				replaceopt.Upsert(true))
+			result, err := m.subList.StoreToDB(ctx, collection, dbType)
 			if err != nil {
 				m.logger.Error("error when write-back to DB: " + err.Error())
 			}
@@ -180,63 +129,21 @@ func (m *plurkSubManager) loadFromDB() chan interface{} {
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			collection := db.Collection(funcKey)
-			m.Lock()
-			defer m.Unlock()
-			result := collection.FindOne(ctx, map[string]string{"type": dbType})
-			doc := bson.NewDocument()
-			err := result.Decode(doc)
+			err := m.subList.LoadFromDB(ctx, collection, dbType, reflect.TypeOf(""))
 			if err != nil {
 				m.logger.Error("error when load from DB: " + err.Error())
-			} else {
-				m.subList = bsonToTable(doc)
 			}
 			m.logger.Info("load from DB done")
-			return result
+			return err
 		},
 		Return: retCh,
 	})
 	return retCh
 }
 
-func (m *plurkSubManager) createSub(user *string, channel *telepathy.Channel) bool {
-	m.Lock()
-	defer m.Unlock()
-	return createSubNoLock(user, channel, m.subList)
-}
-
-func createSubNoLock(user *string, channel *telepathy.Channel, table *sync.Map) bool {
-	load, loaded := table.LoadOrStore(*user, channelList{*channel: true})
-	// If not loaded, new subscriber is stored
-	if loaded {
-		// Append new subscriber to the list
-		subr, _ := load.(channelList)
-		if subr[*channel] {
-			return false // exists
-		}
-		subr[*channel] = true
-	}
-	return true
-}
-
-func (m *plurkSubManager) removeSub(user *string, channel *telepathy.Channel) bool {
-	m.Lock()
-	defer m.Unlock()
-	load, ok := m.subList.Load(*user)
-	if ok {
-		subrList, _ := load.(channelList)
-		if subrList[*channel] {
-			delete(subrList, *channel)
-			m.subList.Store(*user, subrList)
-			return true
-		}
-	}
-	return false
-}
-
 func (m *plurkSubManager) subscriptions(channel *telepathy.Channel) []string {
 	subs := []string{}
-	m.subList.Range(func(key, value interface{}) bool {
-		subrList, _ := value.(channelList)
+	m.subList.Range(func(key interface{}, subrList telepathy.ChannelList) bool {
 		if subrList[*channel] {
 			user, _ := key.(string)
 			subs = append(subs, user)

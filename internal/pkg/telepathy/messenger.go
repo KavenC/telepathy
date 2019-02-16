@@ -8,11 +8,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// MessengerConfig is a configuration map which passes to registered
-// constructor of each Messenger handler.
-// The content will be defined by Messenger handlers
-type MessengerConfig map[string]interface{}
-
 // MsgrUserProfile holds the information of a messenger user
 type MsgrUserProfile struct {
 	ID          string
@@ -77,7 +72,7 @@ type MessengerIllegalIDError struct {
 // This is used to pass framework information to Messenger modules
 type MsgrCtorParam struct {
 	Session    *Session
-	Config     MessengerConfig
+	Config     PluginConfig
 	MsgHandler InboundMsgHandler
 	Logger     *logrus.Entry
 }
@@ -132,7 +127,7 @@ func RegisterMessenger(ID string, ctor MessengerCtor) error {
 	return nil
 }
 
-func newMessageManager(session *Session, configTable *map[string]MessengerConfig) *MessageManager {
+func newMessageManager(session *Session, configTable map[string]PluginConfig) *MessageManager {
 	logger := logrus.WithField("module", "messageManager")
 	manager := MessageManager{
 		messengers: make(map[string]Messenger),
@@ -146,7 +141,7 @@ func newMessageManager(session *Session, configTable *map[string]MessengerConfig
 	for ID, ctor := range msgrCtors {
 		param := param
 		param.Logger = logrus.WithField("messenger", ID)
-		config, configExists := (*configTable)[ID]
+		config, configExists := configTable[ID]
 		if !configExists {
 			logger.WithField("messenger", ID).Warnf("config for %s does not exist", ID)
 		}

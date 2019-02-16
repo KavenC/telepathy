@@ -2,6 +2,8 @@ package telepathy
 
 import (
 	"context"
+	"net/url"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -22,11 +24,13 @@ type Session struct {
 type SessionConfig struct {
 	// Infrastructure configs
 	Port         string // Port Number for Webhook handling server
+	RootURL      string // URL to telepathy server
 	RedisURL     string // URL to the Redis server
 	MongoURL     string // URL to the MongoDB Server
 	DatabaseName string // MongoDB database name
-	// Messenger Config
-	MessengerConfigTable map[string]MessengerConfig
+	// Plugin Config Tables
+	MessengerConfigTable map[string]PluginConfig
+	ServiceConfigTable   map[string]PluginConfig
 }
 
 // NewSession creates a new Telepathy session
@@ -35,6 +39,10 @@ func NewSession(config SessionConfig) (*Session, error) {
 		WebServer: httpServer{},
 	}
 	var err error
+	session.WebServer.uRL, err = url.Parse(config.RootURL)
+	if err != nil {
+		return nil, err
+	}
 
 	// Init redis
 	session.Redis, err = newRedisHandle(config.RedisURL)
@@ -52,16 +60,18 @@ func NewSession(config SessionConfig) (*Session, error) {
 	session.Command = newCmdManager(&session)
 
 	// Init messenger
-	session.Message = newMessageManager(&session, &config.MessengerConfigTable)
+	session.Message = newMessageManager(&session, config.MessengerConfigTable)
 
 	// Init service
 	// Internal service
 	RegisterService(channelServiceID, newChannelService)
-	session.Service = newServiceManager(&session)
+	session.Service = newServiceManager(&session, config.ServiceConfigTable)
 
 	// Init httpServer
-	session.WebServer.init(config.Port)
-
+	err = session.WebServer.init(config.Port)
+	if err != nil {
+		return nil, err
+	}
 	return &session, nil
 }
 
@@ -69,21 +79,45 @@ func NewSession(config SessionConfig) (*Session, error) {
 // The function always returns an error when the seesion is terminated
 func (s *Session) Start(ctx context.Context) {
 	logrus.Info("session start")
+
+	var wg sync.WaitGroup
+	// Start backend services
+	logrus.Info("starting backend services")
+	wg.Add(2)
 	// Start redis
-	go s.Redis.start(ctx)
+	go func() {
+		s.Redis.start(ctx)
+		wg.Done()
+	}()
 
 	// Start database
-	go s.DB.start(ctx)
+	go func() {
+		s.DB.start(ctx)
+		wg.Done()
+	}()
+	wg.Wait()
 
 	// Start messenger handlers
+	logrus.Info("starting messengers")
+	wg.Add(len(s.Message.messengers))
 	for _, messenger := range s.Message.messengers {
-		go messenger.Start(ctx)
+		go func(msg plugin) {
+			msg.Start(ctx)
+			wg.Done()
+		}(messenger)
 	}
+	wg.Wait()
 
 	// Start services
+	logrus.Info("starting services")
+	wg.Add(len(s.Service.services))
 	for _, service := range s.Service.services {
-		go service.Start(ctx)
+		go func(svc plugin) {
+			svc.Start(ctx)
+			wg.Done()
+		}(service)
 	}
+	wg.Wait()
 
 	//Start Webhook handling server
 	logrus.WithField("module", "session").Info("starting web server")

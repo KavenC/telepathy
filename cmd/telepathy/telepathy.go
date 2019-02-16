@@ -12,6 +12,7 @@ import (
 	"gitlab.com/kavenc/telepathy/internal/pkg/line"
 	_ "gitlab.com/kavenc/telepathy/internal/pkg/plurkrss"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
+	"gitlab.com/kavenc/telepathy/internal/pkg/twitch"
 )
 
 func main() {
@@ -20,18 +21,24 @@ func main() {
 
 	config := telepathy.SessionConfig{
 		Port:                 os.Getenv("PORT"),
+		RootURL:              os.Getenv("URL"),
 		RedisURL:             os.Getenv("REDIS_URL"),
 		MongoURL:             os.Getenv("MONGODB_URL"),
 		DatabaseName:         os.Getenv("MONGODB_NAME"),
-		MessengerConfigTable: make(map[string]telepathy.MessengerConfig),
+		MessengerConfigTable: make(map[string]telepathy.PluginConfig),
+		ServiceConfigTable:   make(map[string]telepathy.PluginConfig),
 	}
 
 	// Setup Messenger Configs
-	config.MessengerConfigTable[line.ID] = make(telepathy.MessengerConfig)
+	config.MessengerConfigTable[line.ID] = make(telepathy.PluginConfig)
 	config.MessengerConfigTable[line.ID]["SECRET"] = os.Getenv("LINE_CHANNEL_SECRET")
 	config.MessengerConfigTable[line.ID]["TOKEN"] = os.Getenv("LINE_CHANNEL_TOKEN")
-	config.MessengerConfigTable[discord.ID] = make(telepathy.MessengerConfig)
+	config.MessengerConfigTable[discord.ID] = make(telepathy.PluginConfig)
 	config.MessengerConfigTable[discord.ID]["BOT_TOKEN"] = os.Getenv("DISCORD_BOT_TOKEN")
+
+	// Setup Service Configs
+	config.ServiceConfigTable[twitch.ID] = make(telepathy.PluginConfig)
+	config.ServiceConfigTable[twitch.ID]["CLIENT_ID"] = os.Getenv("TWITCH_CLIENT_ID")
 
 	session, err := telepathy.NewSession(config)
 	if err != nil {

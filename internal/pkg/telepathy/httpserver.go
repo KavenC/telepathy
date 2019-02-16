@@ -3,12 +3,15 @@ package telepathy
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 
 	"github.com/sirupsen/logrus"
 )
 
 var validHook = regexp.MustCompile(`^[A-Za-z]+(-[A-Za-z0-9]+){0,3}$`)
+
+const webhookRoot = "/webhook/"
 
 // HTTPHandler defines the callback function signature for Webhook handler
 type HTTPHandler func(http.ResponseWriter, *http.Request)
@@ -27,19 +30,22 @@ type WebhookInvalidError struct {
 
 type httpServer struct {
 	http.Server
+	uRL         *url.URL
 	webhookList map[string]HTTPHandler
 }
 
 // RegisterWebhook is used to register a http callback, like webhooks
-// The pattern can only be in this regular expression format: ^[A-Za-z]+(-[A-Za-z0-9]+){0,3}$, otherwise it is ignored.
-// If the pattern is already registered, it panics.
+// The pattern can only be in this regular expression format: ^[A-Za-z]+(-[A-Za-z0-9]+){0,3}$, otherwise
+// the registeration will be ignored.
+// If the pattern is already registered, registeration will be ignored.
 // Webhooks are always registered at (host)/webhook/<patter>
-func (server *httpServer) RegisterWebhook(pattern string, handler HTTPHandler) error {
+// Returns the Webhook callback URL if no error
+func (server *httpServer) RegisterWebhook(pattern string, handler HTTPHandler) (*url.URL, error) {
 	logger := logrus.WithField("module", "httpserv").WithField("webhook", pattern)
 
 	if !validHook.MatchString(pattern) {
 		logger.Errorf("illegal webhook name: %s", pattern)
-		return WebhookInvalidError{Pattern: pattern}
+		return nil, WebhookInvalidError{Pattern: pattern}
 	}
 
 	if server.webhookList == nil {
@@ -48,26 +54,29 @@ func (server *httpServer) RegisterWebhook(pattern string, handler HTTPHandler) e
 
 	if _, ok := server.webhookList[pattern]; ok {
 		logger.Errorf("already registered: %s", pattern)
-		return WebhookExistsError{Pattern: pattern}
+		return nil, WebhookExistsError{Pattern: pattern}
 	}
 
 	server.webhookList[pattern] = handler
 	logger.Infof("registered webhook: %s", pattern)
-	return nil
+	retURL := server.webhookURL()
+	retURL.Path += pattern
+	return retURL, nil
 }
 
 func (server *httpServer) serveMux() *http.ServeMux {
 	mux := http.ServeMux{}
 	for pattern, handler := range server.webhookList {
-		mux.HandleFunc("/webhook/"+pattern, handler)
+		mux.HandleFunc(webhookRoot+pattern, handler)
 	}
 	return &mux
 }
 
-func (server *httpServer) init(port string) {
-	logrus.WithFields(logrus.Fields{
+func (server *httpServer) init(port string) error {
+	logger := logrus.WithFields(logrus.Fields{
 		"module": "httpServer",
-	}).Info("httpServer init port: " + port)
+	})
+	logger.Infof("httpServer init port: %s", port)
 
 	server.Addr = ":" + port
 	mux := server.serveMux()
@@ -77,6 +86,14 @@ func (server *httpServer) init(port string) {
 		fmt.Fprint(response, "Telepathy Bot is Running")
 	})
 	server.Handler = mux
+
+	return nil
+}
+
+func (server *httpServer) webhookURL() *url.URL {
+	copyURL, _ := url.Parse(server.uRL.String())
+	copyURL.Path = webhookRoot
+	return copyURL
 }
 
 func (e WebhookExistsError) Error() string {

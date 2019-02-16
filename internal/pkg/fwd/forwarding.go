@@ -2,28 +2,21 @@ package fwd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"sync"
+	"reflect"
 
-	"github.com/sirupsen/logrus"
-
-	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
-	"github.com/mongodb/mongo-go-driver/mongo/replaceopt"
+	"github.com/sirupsen/logrus"
 
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
 const dbTableName = "fwdtable"
 
-type channelList map[telepathy.Channel]bool
-
 type forwardingManager struct {
 	telepathy.ServicePlugin
 	session *telepathy.Session
-	sync.Mutex
-	table   *sync.Map
+	table   *telepathy.ChannelListMap
 	context context.Context
 	logger  *logrus.Entry
 }
@@ -35,8 +28,8 @@ func init() {
 func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
 	manager := &forwardingManager{
 		session: param.Session,
+		table:   telepathy.NewChannelListMap(),
 		logger:  param.Logger,
-		table:   &sync.Map{},
 	}
 	manager.session.Message.RegisterMessageHandler(manager.msgHandler)
 	return manager, nil
@@ -50,62 +43,6 @@ func (m *forwardingManager) Start(context context.Context) {
 
 func (m *forwardingManager) ID() string {
 	return funcKey
-}
-
-func createFwdNoLock(from, to *telepathy.Channel, target *sync.Map) bool {
-	newTo := channelList{*to: true}
-	load, ok := target.LoadOrStore(*from, newTo)
-	if ok {
-		existsToList, _ := load.(channelList)
-		if existsToList[*to] {
-			return false
-		}
-		existsToList[*to] = true
-		target.Store(*from, existsToList)
-	}
-	return true
-}
-
-func tableToBSON(table *sync.Map) *bson.Document {
-	doc := bson.NewDocument(bson.EC.String("type", "fwdtable"))
-	table.Range(func(key interface{}, value interface{}) bool {
-		from, _ := key.(telepathy.Channel)
-		toList, _ := value.(channelList)
-		bsonToList := bson.NewArray()
-		for to := range toList {
-			bsonToList.Append(bson.VC.String(to.JSON()))
-		}
-		doc.Append(bson.EC.Array(from.JSON(), bsonToList))
-		return true
-	})
-	return doc
-}
-
-func bsonToTable(doc *bson.Document) *sync.Map {
-	table := &sync.Map{}
-	eleIter := doc.Iterator()
-	for {
-		if !eleIter.Next() {
-			break
-		}
-		element := eleIter.Element()
-		toList, ok := element.Value().MutableArrayOK()
-		if ok {
-			fromCh := &telepathy.Channel{}
-			json.Unmarshal([]byte(element.Key()), fromCh)
-			toIter, _ := toList.Iterator()
-			for {
-				if !toIter.Next() {
-					break
-				}
-				toCh := &telepathy.Channel{}
-				jsonStr := toIter.Value().StringValue()
-				json.Unmarshal([]byte(jsonStr), toCh)
-				createFwdNoLock(fromCh, toCh, table)
-			}
-		}
-	}
-	return table
 }
 
 func (m *forwardingManager) msgHandler(ctx context.Context, message telepathy.InboundMessage) {
@@ -129,41 +66,17 @@ func (m *forwardingManager) msgHandler(ctx context.Context, message telepathy.In
 	}
 }
 
-func (m *forwardingManager) createForwarding(from, to telepathy.Channel) bool {
-	m.Lock()
-	defer m.Unlock()
-	return createFwdNoLock(&from, &to, m.table)
-}
-
-func (m *forwardingManager) removeForwarding(from, to telepathy.Channel) bool {
-	m.Lock()
-	defer m.Unlock()
-	load, ok := m.table.Load(from)
-	if !ok {
-		return false
-	}
-	toList, _ := load.(channelList)
-	if toList[to] {
-		delete(toList, to)
-		m.table.Store(from, toList)
-		return true
-	}
-	return false
-}
-
-func (m *forwardingManager) forwardingTo(from telepathy.Channel) channelList {
-	load, ok := m.table.Load(from)
+func (m *forwardingManager) forwardingTo(from telepathy.Channel) telepathy.ChannelList {
+	load, ok := m.table.GetList(from)
 	if !ok {
 		return nil
 	}
-	ret, _ := load.(channelList)
-	return ret
+	return load
 }
 
-func (m *forwardingManager) forwardingFrom(to telepathy.Channel) channelList {
-	ret := make(channelList)
-	m.table.Range(func(key, value interface{}) bool {
-		toList, _ := value.(channelList)
+func (m *forwardingManager) forwardingFrom(to telepathy.Channel) telepathy.ChannelList {
+	ret := make(telepathy.ChannelList)
+	m.table.Range(func(key interface{}, toList telepathy.ChannelList) bool {
 		if toList[to] {
 			from, _ := key.(telepathy.Channel)
 			ret[from] = true
@@ -182,10 +95,7 @@ func (m *forwardingManager) writeToDB() chan interface{} {
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			collection := db.Collection(funcKey)
-			doc := tableToBSON(m.table)
-			result, err := collection.ReplaceOne(ctx,
-				map[string]string{"type": dbTableName}, doc,
-				replaceopt.Upsert(true))
+			result, err := m.table.StoreToDB(ctx, collection, dbTableName)
 			if err != nil {
 				m.logger.Error("error when writing table back to DB: " + err.Error())
 			}
@@ -197,22 +107,18 @@ func (m *forwardingManager) writeToDB() chan interface{} {
 }
 
 func (m *forwardingManager) loadFromDB() chan interface{} {
+	m.table = telepathy.NewChannelListMap()
 	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			collection := db.Collection(funcKey)
-			m.Lock()
-			defer m.Unlock()
-			result := collection.FindOne(ctx, map[string]string{"type": dbTableName})
-			doc := bson.NewDocument()
-			err := result.Decode(doc)
+			err := m.table.LoadFromDB(ctx, collection, dbTableName, reflect.TypeOf(telepathy.Channel{}))
 			if err != nil {
-				m.logger.Error("error when loading table from DB: " + err.Error())
-			} else {
-				m.table = bsonToTable(doc)
+				m.logger.Errorf("load from DB failed: %s", err.Error())
+				return err
 			}
 			m.logger.Info("load from DB done")
-			return result
+			return nil
 		},
 		Return: retCh,
 	})

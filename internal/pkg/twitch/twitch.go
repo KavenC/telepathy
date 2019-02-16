@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
@@ -25,8 +26,8 @@ type twitchService struct {
 	api        *twitchAPI
 	webhookURL *url.URL
 	// webhookSubs: Webhook type -> UserID -> Subsriber channel
-	webhookSubs  map[string]map[string]map[telepathy.Channel]bool
-	streamStatus map[string]bool // UserID -> stream status
+	webhookSubs  map[string]*telepathy.ChannelListMap
+	streamStatus sync.Map // UserID -> stream status
 
 	ctx    context.Context
 	logger *logrus.Entry
@@ -45,13 +46,13 @@ func newTwitchAPI() *twitchAPI {
 func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
 	// Construct service
 	service := &twitchService{
-		session:      param.Session,
-		api:          newTwitchAPI(),
-		logger:       param.Logger,
-		webhookSubs:  make(map[string]map[string]map[telepathy.Channel]bool),
-		streamStatus: make(map[string]bool),
+		session:     param.Session,
+		api:         newTwitchAPI(),
+		logger:      param.Logger,
+		webhookSubs: make(map[string]*telepathy.ChannelListMap),
 	}
 	service.api.logger = service.logger.WithField("phase", "api")
+	service.webhookSubs[whTopicStream] = telepathy.NewChannelListMap()
 
 	clientID, ok := param.Config["CLIENT_ID"]
 	if !ok {
@@ -75,7 +76,7 @@ func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
 
 func (s *twitchService) Start(ctx context.Context) {
 	s.ctx = ctx
-	<-s.streamChangeLoadFromDB()
+	s.streamChangeLoadFromDB()
 }
 
 func (s *twitchService) ID() string {

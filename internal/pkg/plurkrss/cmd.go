@@ -60,7 +60,7 @@ func (m *plurkSubManager) subscribe(cmd *cobra.Command, args []string, extras ..
 		cmd.Print("Invalid Plurk user")
 	}
 
-	if m.createSub(&user, &channel) {
+	if m.subList.AddChannel(user, channel) {
 		cmd.Printf("Subscribed to Plurk user: " + user)
 		m.writeToDB()
 	} else {
@@ -98,7 +98,7 @@ func (m *plurkSubManager) unsubscribe(cmd *cobra.Command, args []string, extras 
 		return
 	}
 
-	if m.removeSub(&user, &channel) {
+	if m.subList.DelChannel(user, channel) {
 		cmd.Printf("Unsubscribed to Plurk user: " + user)
 		m.writeToDB()
 	} else {

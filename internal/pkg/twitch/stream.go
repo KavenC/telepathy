@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
+	"sync"
 	"time"
 
-	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
-	"github.com/mongodb/mongo-go-driver/mongo/replaceopt"
 	"github.com/peterhellberg/link"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
@@ -36,6 +36,8 @@ type Stream struct {
 type StreamList struct {
 	Data []Stream `json:"data"`
 }
+
+var subStreamLock sync.Mutex
 
 func (t *twitchAPI) fetchStream(ctx context.Context, login string,
 	respChan chan<- Stream, errChan chan<- error) {
@@ -96,58 +98,14 @@ func (t *twitchAPI) fetchStream(ctx context.Context, login string,
 	respChan <- streamList.Data[0]
 }
 
-func tableToBSON(table map[string]map[telepathy.Channel]bool) *bson.Document {
-	doc := bson.NewDocument(bson.EC.String("topic", whTopicStream))
-	for userid, channelList := range table {
-		if len(channelList) == 0 {
-			continue
-		}
-		bsonList := bson.NewArray()
-		for channel := range channelList {
-			bsonList.Append(bson.VC.String(channel.JSON()))
-		}
-		doc.Append(bson.EC.Array(userid, bsonList))
-	}
-	return doc
-}
-
-func bsonToTable(doc *bson.Document) map[string]map[telepathy.Channel]bool {
-	table := make(map[string]map[telepathy.Channel]bool)
-	eleIter := doc.Iterator()
-	for {
-		if !eleIter.Next() {
-			break
-		}
-		element := eleIter.Element()
-		toList, ok := element.Value().MutableArrayOK()
-		if ok {
-			userid := element.Key()
-			chIter, _ := toList.Iterator()
-			table[userid] = make(map[telepathy.Channel]bool)
-			for {
-				if !chIter.Next() {
-					break
-				}
-				channel := &telepathy.Channel{}
-				jsonStr := chIter.Value().StringValue()
-				json.Unmarshal([]byte(jsonStr), channel)
-				table[userid][*channel] = true
-			}
-		}
-	}
-	return table
-}
-
 func (s *twitchService) streamChangeWriteToDB() chan interface{} {
 	retCh := make(chan interface{}, 1)
 	s.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			collection := db.Collection(ID)
-			result, err := collection.ReplaceOne(ctx,
-				map[string]string{"topic": whTopicStream}, tableToBSON(s.webhookSubs[whTopicStream]),
-				replaceopt.Upsert(true))
+			result, err := s.webhookSubs[whTopicStream].StoreToDB(ctx, collection, whTopicStream)
 			if err != nil {
-				s.logger.Error("error when write-back to DB: " + err.Error())
+				s.logger.Error("error when store to DB: " + err.Error())
 			}
 			return result
 		},
@@ -156,46 +114,42 @@ func (s *twitchService) streamChangeWriteToDB() chan interface{} {
 	return retCh
 }
 
-func (s *twitchService) streamChangeLoadFromDB() chan interface{} {
+func (s *twitchService) streamChangeLoadFromDB() {
 	retCh := make(chan interface{}, 1)
 	s.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
+			s.webhookSubs[whTopicStream] = telepathy.NewChannelListMap()
 			collection := db.Collection(ID)
-			result := collection.FindOne(ctx, map[string]string{"topic": whTopicStream})
-			doc := bson.NewDocument()
-			err := result.Decode(doc)
-			table := bsonToTable(doc)
+			err := s.webhookSubs[whTopicStream].LoadFromDB(ctx, collection, whTopicStream, reflect.TypeOf(""))
 			if err != nil {
 				s.logger.Error("error when load from DB: " + err.Error())
-			} else {
-				s.webhookSubs[whTopicStream] = table
-				for userid := range s.webhookSubs[whTopicStream] {
-					err := s.subscribeStream(userid)
-					if err != nil {
-						s.logger.WithField("phase", "loadFromDB").Errorf("subscribe stream failed: %s", err.Error())
-					}
-				}
 			}
 			s.logger.Info("load from DB done")
-			return result
+			return err
 		},
 		Return: retCh,
 	})
-	return retCh
+	<-retCh
+
+	// After load from db, resubscribe to websub topic
+	s.webhookSubs[whTopicStream].Range(func(key interface{}, _ telepathy.ChannelList) bool {
+		userid, _ := key.(string)
+		err := s.subscribeStream(userid)
+		if err != nil {
+			s.logger.WithField("phase", "loadFromDB").Errorf("subscribe stream failed: %s", err.Error())
+		}
+		return true
+	})
+	return
 }
 
 func (s *twitchService) streamChangedDel(userid string, channel telepathy.Channel) (bool, error) {
-	if s.webhookSubs[whTopicStream] == nil || s.webhookSubs[whTopicStream][userid] == nil ||
-		!s.webhookSubs[whTopicStream][userid][channel] {
+	if !s.webhookSubs[whTopicStream].DelChannel(userid, channel) {
 		return false, nil
 	}
 
-	delete(s.webhookSubs[whTopicStream][userid], channel)
-	if len(s.webhookSubs[whTopicStream][userid]) == 0 {
-		delete(s.webhookSubs[whTopicStream], userid)
-	}
-	if len(s.webhookSubs[whTopicStream]) == 0 {
-		delete(s.webhookSubs, whTopicStream)
+	if !s.webhookSubs[whTopicStream].KeyExists(userid) {
+		s.streamStatus.Delete(userid)
 	}
 
 	// We don't explicitly send unsubscribe request to hub. The subscription will be either expired or rejected at next
@@ -206,6 +160,14 @@ func (s *twitchService) streamChangedDel(userid string, channel telepathy.Channe
 }
 
 func (s *twitchService) subscribeStream(userid string) error {
+	subStreamLock.Lock()
+	defer subStreamLock.Unlock()
+	_, loaded := s.streamStatus.LoadOrStore(userid, false)
+	if loaded {
+		// already subscribed
+		return nil
+	}
+
 	// Send subscription request to twitch websub hub
 	webSubHub := s.api.newWebSubHub()
 	webSubHub.Set("hub.mode", "subscribe")
@@ -237,9 +199,6 @@ func (s *twitchService) subscribeStream(userid string) error {
 				return
 			}
 			time.Sleep(time.Duration(sleepSec) * time.Second)
-			if s.webhookSubs[whTopicStream] == nil || s.webhookSubs[whTopicStream][userid] == nil {
-				return
-			}
 			s.subscribeStream(userid)
 		}()
 	}()
@@ -248,25 +207,18 @@ func (s *twitchService) subscribeStream(userid string) error {
 }
 
 func (s *twitchService) streamChangedAdd(userid string, channel telepathy.Channel) (bool, error) {
-	if s.webhookSubs[whTopicStream] == nil {
-		s.webhookSubs[whTopicStream] = make(map[string]map[telepathy.Channel]bool)
-	}
-
-	if s.webhookSubs[whTopicStream][userid] == nil {
-		s.webhookSubs[whTopicStream][userid] = make(map[telepathy.Channel]bool)
-		err := s.subscribeStream(userid)
-		if err != nil {
-			return false, err
-		}
-	}
-
-	if s.webhookSubs[whTopicStream][userid][channel] {
+	added := s.webhookSubs[whTopicStream].AddChannel(userid, channel)
+	if !added {
 		return false, nil
 	}
 
-	s.webhookSubs[whTopicStream][userid][channel] = true
-	s.streamChangeWriteToDB()
+	err := s.subscribeStream(userid)
+	if err != nil {
+		s.webhookSubs[whTopicStream].DelChannel(userid, channel)
+		return false, err
+	}
 
+	s.streamChangeWriteToDB()
 	return true, nil
 }
 
@@ -277,7 +229,8 @@ func (s *twitchService) streamChanged(ctx context.Context, request *http.Request
 	headerLinks := link.ParseRequest(request)
 	topicURL, _ := url.Parse(headerLinks["self"].URI)
 	userID := topicURL.Query().Get("user_id")
-	if s.webhookSubs[whTopicStream] == nil || s.webhookSubs[whTopicStream][userID] == nil {
+	chList, ok := s.webhookSubs[whTopicStream].GetList(userID)
+	if !ok {
 		// no subscribers, reply 410 to terminate the subscription
 		localLogger.Warnf("get callback but not subscribers, do unsub. ReqURL: %s", request.URL.String())
 		resp <- 410
@@ -323,14 +276,18 @@ func (s *twitchService) streamChanged(ctx context.Context, request *http.Request
 	var msg string
 	if len(streamList.Data) == 0 {
 		msg = fmt.Sprintf("%s stream goes offline.", userName)
-		s.streamStatus[userID] = false
+		s.streamStatus.Store(userID, false)
 	} else {
-		if s.streamStatus[userID] {
+		value, loaded := s.streamStatus.LoadOrStore(userID, true)
+		if !loaded {
+			localLogger.Warnf("no stream status when getting callback")
+		}
+		status, _ := value.(bool)
+		if status {
 			msg = "== Twitch Stream Update ==\n"
 		} else {
 			msg = "== Twitch Stream Online ==\n"
 		}
-		s.streamStatus[userID] = true
 		stream := streamList.Data[0]
 		msg += fmt.Sprintf(`- Title: %s
 - Streamer: %s
@@ -338,7 +295,7 @@ func (s *twitchService) streamChanged(ctx context.Context, request *http.Request
 	}
 
 	// Broadcast message
-	for channel := range s.webhookSubs[whTopicStream][userID] {
+	for channel := range chList {
 		messenger, _ := s.session.Message.Messenger(channel.MessengerID)
 		outMsg := telepathy.OutboundMessage{
 			TargetID: channel.ChannelID,

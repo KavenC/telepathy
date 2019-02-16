@@ -354,7 +354,7 @@ func (m *forwardingManager) info(cmd *cobra.Command, args []string, extras ...in
 }
 
 func (m *forwardingManager) createFwd(from, to, this *telepathy.Channel) string {
-	ok := m.createForwarding(*from, *to)
+	ok := m.table.AddChannel(*from, *to)
 	var ret string
 
 	if !ok {
@@ -547,8 +547,8 @@ func (m *forwardingManager) delFrom(cmd *cobra.Command, args []string, extras ..
 	change := false
 	for _, fromChName := range args {
 		fromCh := telepathy.NewChannel(fromChName)
-		if !m.removeForwarding(*fromCh, thisCh) {
-			cmd.Printf("Invalid channel: %s\n", fromChName)
+		if !m.table.DelChannel(*fromCh, thisCh) {
+			cmd.Printf("Message forwarding from: %s does not exist\n", fromChName)
 			continue
 		}
 		cmd.Printf("Stop receiving messages from: %s\n", fromChName)
@@ -578,8 +578,8 @@ func (m *forwardingManager) delTo(cmd *cobra.Command, args []string, extras ...i
 	change := false
 	for _, toChName := range args {
 		toCh := telepathy.NewChannel(toChName)
-		if !m.removeForwarding(thisCh, *toCh) {
-			cmd.Printf("Invalid channel: %s\n", toChName)
+		if !m.table.DelChannel(thisCh, *toCh) {
+			cmd.Printf("Message forwarding to: %s doesnot exist\n", toChName)
 			continue
 		}
 		cmd.Printf("Stop forwarding messages to: %s\n", toChName)

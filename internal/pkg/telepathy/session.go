@@ -82,6 +82,7 @@ func (s *Session) Start(ctx context.Context) {
 
 	var wg sync.WaitGroup
 	// Start backend services
+	logrus.Info("starting backend services")
 	wg.Add(2)
 	// Start redis
 	go func() {
@@ -97,6 +98,7 @@ func (s *Session) Start(ctx context.Context) {
 	wg.Wait()
 
 	// Start messenger handlers
+	logrus.Info("starting messengers")
 	wg.Add(len(s.Message.messengers))
 	for _, messenger := range s.Message.messengers {
 		go func(msg plugin) {
@@ -107,6 +109,7 @@ func (s *Session) Start(ctx context.Context) {
 	wg.Wait()
 
 	// Start services
+	logrus.Info("starting services")
 	wg.Add(len(s.Service.services))
 	for _, service := range s.Service.services {
 		go func(svc plugin) {

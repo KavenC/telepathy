@@ -56,3 +56,9 @@
 [[constraint]]
   name = "github.com/mongodb/mongo-go-driver"
   version = "0.3.0"
+
+[metadata.heroku]
+  root-package = "gitlab.com/kavenc/telepathy"
+  go-version = "1.11"
+  install = ["./..."]
+  

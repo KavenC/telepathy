@@ -83,15 +83,17 @@ func (m *messenger) Start(ctx context.Context) {
 	m.ctx = ctx
 
 	// Run until being cancelled
-	<-ctx.Done()
+	go func() {
+		<-ctx.Done()
 
-	m.logger.Info("terminating")
-	// Cleanly close down the Discord session.
-	err = m.bot.Close()
+		m.logger.Info("terminating")
+		// Cleanly close down the Discord session.
+		err = m.bot.Close()
 
-	if err != nil {
-		m.logger.Errorf("error when closing: %s", err.Error())
-	}
+		if err != nil {
+			m.logger.Errorf("error when closing: %s", err.Error())
+		}
+	}()
 }
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {

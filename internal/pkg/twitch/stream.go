@@ -232,7 +232,7 @@ func (s *twitchService) streamChanged(ctx context.Context, request *http.Request
 	chList, ok := s.webhookSubs[whTopicStream].GetList(userID)
 	if !ok {
 		// no subscribers, reply 410 to terminate the subscription
-		localLogger.Warnf("get callback but not subscribers, do unsub. ReqURL: %s", request.URL.String())
+		localLogger.Warnf("get callback but not subscribers, do unsub. user_id: %s", userID)
 		resp <- 410
 		return
 	}

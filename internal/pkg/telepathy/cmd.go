@@ -100,18 +100,20 @@ func (m *cmdManager) handleCmdMsg(ctx context.Context, message *InboundMessage) 
 	// Parse it with command interface
 	args := regexp.MustCompile(" +").Split(message.Text, -1)[1:]
 
-	m.rootCmd.SetArgs(args)
+	cmd := *m.rootCmd // make a copy to be goroutine safe
+
+	cmd.SetArgs(args)
 	var buffer strings.Builder
-	m.rootCmd.SetOutput(&buffer)
+	cmd.SetOutput(&buffer)
 
 	// Execute command
 	extraArgs := CmdExtraArgs{
 		Ctx:     ctx,
 		Message: message,
 	}
-	m.rootCmd.Execute(extraArgs)
+	cmd.Execute(extraArgs)
 
-	// If there is some stirng output, forward it back to user
+	// If there is stirng output, forward it back to messenger
 	if buffer.Len() > 0 {
 		replyMsg := &OutboundMessage{
 			TargetID: message.FromChannel.ChannelID,

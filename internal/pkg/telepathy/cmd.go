@@ -74,10 +74,16 @@ func (m *cmdManager) handleCmdMsg(ctx context.Context, message *InboundMessage) 
 	state := &argo.State{}
 	err := m.rootCmd.Parse(state, args, extraArgs)
 	if err != nil {
-		m.logger.Errorf("handleCmdMsg: %s", err.Error())
+		var replyText string
+		if fewCmdErr, ok := err.(argo.TooFewArgsError); ok {
+			replyText = fewCmdErr.Victim.Help()
+		} else {
+			replyText = "Oops somehow I failed to complete the action, please try again later"
+			m.logger.Errorf("handleCmdMsg: %s", err.Error())
+		}
 		replyMsg := &OutboundMessage{
 			TargetID: message.FromChannel.ChannelID,
-			Text:     "Internal Error",
+			Text:     replyText,
 		}
 		msg, _ := m.session.Message.Messenger(message.FromChannel.MessengerID)
 		msg.Send(replyMsg)

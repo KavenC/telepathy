@@ -39,12 +39,12 @@ func (c *channelService) ID() string {
 func (c *channelService) CommandInterface() *argo.Action {
 	cmd := &argo.Action{
 		Trigger:    "channel",
-		ShortDescr: "Telepathy channel management",
+		ShortDescr: "Telepathy Channel Management",
 	}
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "name",
-		ShortDescr: "Show the name of current channel.",
+		ShortDescr: "Show the name of current channel",
 		Do:         cmdChannelName,
 	})
 

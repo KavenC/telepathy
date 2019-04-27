@@ -25,7 +25,7 @@
 #   unused-packages = true
 [[constraint]]
   name = "gitlab.com/kavenc/argo"
-  branch = "master"
+  branch = "helptext-format"
 
 [[constraint]]
   name = "github.com/bwmarrin/discordgo"

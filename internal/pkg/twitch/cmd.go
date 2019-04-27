@@ -13,19 +13,21 @@ import (
 func (s *twitchService) CommandInterface() *argo.Action {
 	cmd := &argo.Action{
 		Trigger:    s.ID(),
-		ShortDescr: "Twitch Sbuscribe Service",
+		ShortDescr: "Twitch Subscribe Service",
 	}
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "substream",
 		ShortDescr: "Get notification when the user's stream changes",
+		ArgNames:   []string{"user-name"},
 		MinConsume: 1,
 		Do:         s.subStream,
 	})
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "unsubstream",
-		ShortDescr: "Unsubscribe to User stream notifications",
+		ShortDescr: "Unsubscribe to user's stream notifications",
+		ArgNames:   []string{"user-name"},
 		MinConsume: 1,
 		Do:         s.unsubStream,
 	})
@@ -33,6 +35,7 @@ func (s *twitchService) CommandInterface() *argo.Action {
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "user",
 		ShortDescr: "Get user information",
+		ArgNames:   []string{"user-name"},
 		MinConsume: 1,
 		Do:         s.queryUser,
 	})
@@ -40,6 +43,7 @@ func (s *twitchService) CommandInterface() *argo.Action {
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "stream",
 		ShortDescr: "Get user's stream information",
+		ArgNames:   []string{"user-name"},
 		MinConsume: 1,
 		Do:         s.queryStream,
 	})

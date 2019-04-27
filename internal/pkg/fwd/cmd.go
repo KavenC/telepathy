@@ -100,6 +100,7 @@ func (m *forwardingManager) CommandInterface() *argo.Action {
 		Trigger:    "del-from",
 		MinConsume: 1,
 		MaxConsume: -1,
+		ArgNames:   []string{"channel-id", "channel-id"},
 		ShortDescr: "Stop receiving forwarded messages from specified channels",
 		Do:         m.delFrom,
 	})
@@ -108,13 +109,15 @@ func (m *forwardingManager) CommandInterface() *argo.Action {
 		Trigger:    "del-to",
 		MinConsume: 1,
 		MaxConsume: -1,
+		ArgNames:   []string{"channel-id", "channel-id"},
 		ShortDescr: "Stop forwarding messages to specified channels",
 		Do:         m.delTo,
 	})
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "set",
-		ShortDescr: "Used for identify channels various channel features.",
+		ShortDescr: "Used for identify channel for various channel features",
+		ArgNames:   []string{"hash"},
 		MinConsume: 1,
 		Do:         m.set,
 	})

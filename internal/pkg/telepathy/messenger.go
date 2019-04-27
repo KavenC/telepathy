@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/KavenC/cobra"
 	"github.com/sirupsen/logrus"
+	"gitlab.com/kavenc/argo"
 )
 
 // MsgrUserProfile holds the information of a messenger user
@@ -101,7 +101,7 @@ func (e MessengerIllegalIDError) Error() string {
 
 // CommandInterface returns the command interface of a Messenger
 // The stub here makes it optional to implement this for Messenger plugins
-func (m *MessengerPlugin) CommandInterface() *cobra.Command {
+func (m *MessengerPlugin) CommandInterface() *argo.Action {
 	return nil
 }
 

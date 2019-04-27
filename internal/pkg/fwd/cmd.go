@@ -3,12 +3,13 @@ package fwd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/KavenC/cobra"
 	"github.com/go-redis/redis"
 	"github.com/sirupsen/logrus"
+	"gitlab.com/kavenc/argo"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
@@ -71,55 +72,51 @@ func (e TerminatedError) Error() string {
 	return "Terminated: " + e.Msg
 }
 
-func (m *forwardingManager) CommandInterface() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "fwd",
-		Short: "Cross-app Message Forwarding",
-		Run: func(*cobra.Command, []string, ...interface{}) {
-			// Do nothing
-		},
+func (m *forwardingManager) CommandInterface() *argo.Action {
+	cmd := &argo.Action{
+		Trigger:    "fwd",
+		ShortDescr: "Cross-app Message Forwarding",
 	}
 
-	cmd.AddCommand(&cobra.Command{
-		Use:   "2way",
-		Short: "Create two-way channel forwarding (DM only)",
-		Run:   m.createTwoWay,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "2way",
+		ShortDescr: "Create two-way channel forwarding (DM only)",
+		Do:         m.createTwoWay,
 	})
 
-	cmd.AddCommand(&cobra.Command{
-		Use:   "1way",
-		Short: "Create one-way channel forwarding (DM only)",
-		Run:   m.createOneWay,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "1way",
+		ShortDescr: "Create one-way channel forwarding (DM only)",
+		Do:         m.createOneWay,
 	})
 
-	cmd.AddCommand(&cobra.Command{
-		Use:   "info",
-		Short: "Show message forwarding info (form/to).",
-		Run:   m.info,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "info",
+		ShortDescr: "Show message forwarding info (form/to).",
+		Do:         m.info,
 	})
 
-	cmd.AddCommand(&cobra.Command{
-		Use:     "del-from",
-		Example: "del-from LINE(channelId) DISCORD(channelId)",
-		Args:    cobra.MinimumNArgs(1),
-		Short:   "Stop receiving forwarded messages from specified channels",
-		Run:     m.delFrom,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "del-from",
+		MinConsume: 1,
+		MaxConsume: -1,
+		ShortDescr: "Stop receiving forwarded messages from specified channels",
+		Do:         m.delFrom,
 	})
 
-	cmd.AddCommand(&cobra.Command{
-		Use:     "del-to",
-		Example: "del-to LINE(channelId) DISCORD(channelId)",
-		Args:    cobra.MinimumNArgs(1),
-		Short:   "Stop forwarding messages to specified channels",
-		Run:     m.delTo,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "del-to",
+		MinConsume: 1,
+		MaxConsume: -1,
+		ShortDescr: "Stop forwarding messages to specified channels",
+		Do:         m.delTo,
 	})
 
-	cmd.AddCommand(&cobra.Command{
-		Use:     "set",
-		Example: "set [key]",
-		Short:   "Used for identify channels various channel features.",
-		Args:    cobra.ExactArgs(1),
-		Run:     m.set,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "set",
+		ShortDescr: "Used for identify channels various channel features.",
+		MinConsume: 1,
+		Do:         m.set,
 	})
 
 	return cmd
@@ -268,30 +265,29 @@ func (m *forwardingManager) initSession(ctx context.Context, session *Session) (
 	return redisRet.keys[1], redisRet.keys[2], nil
 }
 
-func (m *forwardingManager) setupFwd(cmd *cobra.Command, session *Session, extraArgs telepathy.CmdExtraArgs) {
+func (m *forwardingManager) setupFwd(state *argo.State, session *Session, extraArgs telepathy.CmdExtraArgs) {
 	key1, key2, err := m.initSession(extraArgs.Ctx, session)
 	prefix := telepathy.CommandPrefix
 
 	if err != nil {
-		cmd.Print(err)
+		state.OutputStr.WriteString(err.Error())
 	} else {
-		cmd.Print(`
+		state.OutputStr.WriteString(`
 1. Make sure Teruhashi is in both channels.
 2. Send "` + prefix + " fwd set " + key1 + `" to the first channel. (Without: ").
 3. Send "` + prefix + " fwd set " + key2 + `" to the second channel. (Without: ").`)
 	}
 }
 
-func (m *forwardingManager) createTwoWay(cmd *cobra.Command, args []string, extras ...interface{}) {
+func (m *forwardingManager) createTwoWay(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
-		cmd.Print("Internal error. Command failed.")
-		return
+		return errors.New("failed to parse extraArgs")
 	}
 
-	if !telepathy.CommandEnsureDM(cmd, extraArgs) {
-		return
+	if !telepathy.CommandEnsureDM(state, extraArgs) {
+		return nil
 	}
 
 	session := Session{
@@ -299,20 +295,20 @@ func (m *forwardingManager) createTwoWay(cmd *cobra.Command, args []string, extr
 		Cmd:       twoWay,
 	}
 
-	cmd.Print("Setup two-way channel forwarding in following steps:")
-	m.setupFwd(cmd, &session, extraArgs)
+	state.OutputStr.WriteString("Setup two-way channel forwarding in following steps:\n")
+	m.setupFwd(state, &session, extraArgs)
+	return nil
 }
 
-func (m *forwardingManager) createOneWay(cmd *cobra.Command, args []string, extras ...interface{}) {
+func (m *forwardingManager) createOneWay(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
-		cmd.Print("Internal error. Command failed.")
-		return
+		return errors.New("failed to parse extraArgs")
 	}
 
-	if !telepathy.CommandEnsureDM(cmd, extraArgs) {
-		return
+	if !telepathy.CommandEnsureDM(state, extraArgs) {
+		return nil
 	}
 
 	session := Session{
@@ -320,37 +316,39 @@ func (m *forwardingManager) createOneWay(cmd *cobra.Command, args []string, extr
 		Cmd:       oneWay,
 	}
 
-	cmd.Print("Setup one-way channel forwarding in following steps:")
-	m.setupFwd(cmd, &session, extraArgs)
+	state.OutputStr.WriteString("Setup one-way channel forwarding in following steps:\n")
+	m.setupFwd(state, &session, extraArgs)
+	return nil
 }
 
-func (m *forwardingManager) info(cmd *cobra.Command, args []string, extras ...interface{}) {
+func (m *forwardingManager) info(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
-		cmd.Print("Internal error. Command failed.")
-		return
+		return errors.New("failed to parse extraArgs")
 	}
 
 	toChList := m.forwardingTo(extraArgs.Message.FromChannel)
 	if toChList != nil {
-		cmd.Print("= Messages are forwarding to:")
+		state.OutputStr.WriteString("= Messages are forwarding to:")
 		for toCh := range toChList {
-			cmd.Printf("\n%s", toCh.Name())
+			fmt.Fprintf(&state.OutputStr, "\n%s", toCh.Name())
 		}
 	}
 
 	fromChList := m.forwardingFrom(extraArgs.Message.FromChannel)
 	if fromChList != nil {
-		cmd.Print("\n\n= Receiving forwarded messages from:")
+		state.OutputStr.WriteString("\n\n= Receiving forwarded messages from:")
 		for fromCh := range fromChList {
-			cmd.Printf("\n%s", fromCh.Name())
+			fmt.Fprintf(&state.OutputStr, "\n%s", fromCh.Name())
 		}
 	}
 
 	if toChList == nil && fromChList == nil {
-		cmd.Print("This channel is not in any forwarding pairs.")
+		state.OutputStr.WriteString("This channel is not in any forwarding pairs.")
 	}
+
+	return nil
 }
 
 func (m *forwardingManager) createFwd(from, to, this *telepathy.Channel) string {
@@ -504,14 +502,14 @@ func (m *forwardingManager) setKeyProcess(key, cid, msg string) func(*redis.Clie
 	}
 }
 
-func (m *forwardingManager) set(cmd *cobra.Command, args []string, extras ...interface{}) {
+func (m *forwardingManager) set(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
-		cmd.Print("Internal error. Command failed.")
-		return
+		return errors.New("failed to parse extraArgs")
 	}
 
+	args := state.Args()
 	msg := extraArgs.Message.FromChannel.MessengerID
 	cid := extraArgs.Message.FromChannel.ChannelID
 	key := args[0]
@@ -530,28 +528,29 @@ func (m *forwardingManager) set(cmd *cobra.Command, args []string, extras ...int
 	case reply := <-redisRet:
 		replyStr, _ := reply.(string)
 		if replyStr != "" {
-			cmd.Print(replyStr)
+			state.OutputStr.WriteString(replyStr)
 		}
 	}
+
+	return nil
 }
 
-func (m *forwardingManager) delFrom(cmd *cobra.Command, args []string, extras ...interface{}) {
+func (m *forwardingManager) delFrom(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
-		cmd.Print("Internal error. Command failed.")
-		return
+		return errors.New("failed to parse extraArgs")
 	}
 	thisCh := extraArgs.Message.FromChannel
 
 	change := false
-	for _, fromChName := range args {
+	for _, fromChName := range state.Args() {
 		fromCh := telepathy.NewChannel(fromChName)
 		if !m.table.DelChannel(*fromCh, thisCh) {
-			cmd.Printf("Message forwarding from: %s does not exist\n", fromChName)
+			fmt.Fprintf(&state.OutputStr, "Message forwarding from: %s does not exist\n", fromChName)
 			continue
 		}
-		cmd.Printf("Stop receiving messages from: %s\n", fromChName)
+		fmt.Fprintf(&state.OutputStr, "Stop receiving messages from: %s\n", fromChName)
 		messenger, _ := m.session.Message.Messenger(fromCh.MessengerID)
 		msg := telepathy.OutboundMessage{
 			TargetID: fromCh.ChannelID,
@@ -564,25 +563,26 @@ func (m *forwardingManager) delFrom(cmd *cobra.Command, args []string, extras ..
 	if change {
 		m.writeToDB()
 	}
+
+	return nil
 }
 
-func (m *forwardingManager) delTo(cmd *cobra.Command, args []string, extras ...interface{}) {
+func (m *forwardingManager) delTo(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
-		cmd.Print("Internal error. Command failed.")
-		return
+		return errors.New("failed to parse extraArgs")
 	}
 	thisCh := extraArgs.Message.FromChannel
 
 	change := false
-	for _, toChName := range args {
+	for _, toChName := range state.Args() {
 		toCh := telepathy.NewChannel(toChName)
 		if !m.table.DelChannel(thisCh, *toCh) {
-			cmd.Printf("Message forwarding to: %s doesnot exist\n", toChName)
+			fmt.Fprintf(&state.OutputStr, "Message forwarding to: %s doesnot exist\n", toChName)
 			continue
 		}
-		cmd.Printf("Stop forwarding messages to: %s\n", toChName)
+		fmt.Fprintf(&state.OutputStr, "Stop forwarding messages to: %s\n", toChName)
 		messenger, _ := m.session.Message.Messenger(toCh.MessengerID)
 		msg := telepathy.OutboundMessage{
 			TargetID: toCh.ChannelID,
@@ -595,4 +595,6 @@ func (m *forwardingManager) delTo(cmd *cobra.Command, args []string, extras ...i
 	if change {
 		m.writeToDB()
 	}
+
+	return nil
 }

@@ -67,6 +67,9 @@ func NewSession(config SessionConfig) (*Session, error) {
 	RegisterService(channelServiceID, newChannelService)
 	session.Service = newServiceManager(&session, config.ServiceConfigTable)
 
+	// Finalize command manager
+	session.Command.rootCmd.Finalize()
+
 	// Init httpServer
 	err = session.WebServer.init(config.Port)
 	if err != nil {

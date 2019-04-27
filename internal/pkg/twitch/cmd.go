@@ -2,54 +2,46 @@ package twitch
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
+	"gitlab.com/kavenc/argo"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
-
-	"github.com/KavenC/cobra"
 )
 
-func (s *twitchService) CommandInterface() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   s.ID(),
-		Short: "Twitch Sbuscribe Service",
-		Run: func(*cobra.Command, []string, ...interface{}) {
-			// Do nothing
-		},
+func (s *twitchService) CommandInterface() *argo.Action {
+	cmd := &argo.Action{
+		Trigger:    s.ID(),
+		ShortDescr: "Twitch Sbuscribe Service",
 	}
 
-	cmd.AddCommand(&cobra.Command{
-		Use:     "substream [user]",
-		Example: "substream riorz",
-		Short:   "Get notification when the user's stream changes",
-		Args:    cobra.ExactArgs(1),
-		Run:     s.subStream,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "substream",
+		ShortDescr: "Get notification when the user's stream changes",
+		MinConsume: 1,
+		Do:         s.subStream,
 	})
 
-	cmd.AddCommand(&cobra.Command{
-		Use:     "unsubstream [user]",
-		Example: "unsubstream riorz",
-		Short:   "Unsubscribe to user stream notifications",
-		Args:    cobra.ExactArgs(1),
-		Run:     s.unsubStream,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "unsubstream",
+		ShortDescr: "Unsubscribe to User stream notifications",
+		MinConsume: 1,
+		Do:         s.unsubStream,
 	})
 
-	cmd.AddCommand(&cobra.Command{
-		Hidden:  true,
-		Use:     "user [user]",
-		Example: "user riorz",
-		Short:   "Get user information",
-		Args:    cobra.ExactArgs(1),
-		Run:     s.queryUser,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "user",
+		ShortDescr: "Get user information",
+		MinConsume: 1,
+		Do:         s.queryUser,
 	})
 
-	cmd.AddCommand(&cobra.Command{
-		Hidden:  true,
-		Use:     "stream [user]",
-		Example: "stream riorz",
-		Short:   "Get user stream information",
-		Args:    cobra.ExactArgs(1),
-		Run:     s.queryStream,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "stream",
+		ShortDescr: "Get user's stream information",
+		MinConsume: 1,
+		Do:         s.queryStream,
 	})
 
 	return cmd
@@ -57,8 +49,8 @@ func (s *twitchService) CommandInterface() *cobra.Command {
 
 const reqTimeOut = 5 * time.Second
 
-func (s *twitchService) subStream(cmd *cobra.Command, args []string, extraArgs ...interface{}) {
-	streamUser := args[0]
+func (s *twitchService) subStream(state *argo.State, extraArgs ...interface{}) error {
+	streamUser := state.Args()[0]
 	errChan := make(chan error)
 	respChan := make(chan *User)
 	ctx, cancel := context.WithTimeout(s.ctx, reqTimeOut)
@@ -70,38 +62,39 @@ func (s *twitchService) subStream(cmd *cobra.Command, args []string, extraArgs .
 	extArg, ok := extraArgs[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		localLogger.Error("invalid extra args")
-		cmd.Print("Internal error.")
-		return
+		return errors.New("invalid extra args")
 	}
 
 	fromChannel := extArg.Message.FromChannel
 
 	select {
-	case user := <-respChan:
-		if user == nil {
-			cmd.Printf("Twitch user not found: %s", streamUser)
-			return
+	case User := <-respChan:
+		if User == nil {
+			fmt.Fprintf(&state.OutputStr, "Twitch User not found: %s", streamUser)
+			return nil
 		}
-		ok, err := s.streamChangedAdd(user.ID, fromChannel)
+		ok, err := s.streamChangedAdd(User.ID, fromChannel)
 		if err != nil {
 			localLogger.Error(err.Error())
-			cmd.Print("Error when registering to Twitch webhook.")
+			fmt.Fprintf(&state.OutputStr, "Error when registering to Twitch webhook.")
 		}
 		if !ok {
-			cmd.Printf("This channel has already subscribed to Twitch user: %s", user.DisplayName)
-			return
+			fmt.Fprintf(&state.OutputStr, "This channel has already subscribed to Twitch User: %s", User.DisplayName)
+			return nil
 		}
-		cmd.Printf("Successfully subscribed to Twitch user: %s", user.DisplayName)
+		fmt.Fprintf(&state.OutputStr, "Successfully subscribed to Twitch User: %s", User.DisplayName)
 	case err := <-errChan:
 		localLogger.Error(err.Error())
-		cmd.Print("Internal error.")
+		fmt.Fprintf(&state.OutputStr, "Internal error.")
 	case <-ctx.Done():
-		cmd.Printf("Request timeout, please try again later.")
+		fmt.Fprintf(&state.OutputStr, "Request timeout, please try again later.")
 	}
+
+	return nil
 }
 
-func (s *twitchService) unsubStream(cmd *cobra.Command, args []string, extraArgs ...interface{}) {
-	streamUser := args[0]
+func (s *twitchService) unsubStream(state *argo.State, extraArgs ...interface{}) error {
+	streamUser := state.Args()[0]
 	errChan := make(chan error)
 	respChan := make(chan *User)
 	ctx, cancel := context.WithTimeout(s.ctx, reqTimeOut)
@@ -113,88 +106,93 @@ func (s *twitchService) unsubStream(cmd *cobra.Command, args []string, extraArgs
 	extArg, ok := extraArgs[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		localLogger.Error("invalid extra args")
-		cmd.Print("Internal error.")
-		return
+		return errors.New("invalid extra args")
 	}
 
 	fromChannel := extArg.Message.FromChannel
 
 	select {
-	case user := <-respChan:
-		if user == nil {
-			cmd.Printf("Twitch user not found: %s", streamUser)
-			return
+	case User := <-respChan:
+		if User == nil {
+			fmt.Fprintf(&state.OutputStr, "Twitch User not found: %s", streamUser)
+			return nil
 		}
-		ok, err := s.streamChangedDel(user.ID, fromChannel)
+		ok, err := s.streamChangedDel(User.ID, fromChannel)
 		if err != nil {
 			localLogger.Error(err.Error())
-			cmd.Print("Internal Error.")
+			state.OutputStr.WriteString("Internal Error.")
 		}
 		if !ok {
-			cmd.Printf("This channel has not yet subscribed to Twitch user: %s", user.DisplayName)
-			return
+			fmt.Fprintf(&state.OutputStr, "This channel has not yet subscribed to Twitch User: %s", User.DisplayName)
+			return nil
 		}
-		cmd.Printf("Successfully unsubscribed to Twitch user: %s", user.DisplayName)
+		fmt.Fprintf(&state.OutputStr, "Successfully unsubscribed to Twitch User: %s", User.DisplayName)
 	case err := <-errChan:
 		localLogger.Error(err.Error())
-		cmd.Print("Internal error.")
+		state.OutputStr.WriteString("Internal error.")
 	case <-ctx.Done():
-		cmd.Printf("Request timeout, please try again later.")
+		fmt.Fprintf(&state.OutputStr, "Request timeout, please try again later.")
 	}
+	return nil
 }
 
-func (s *twitchService) queryUser(cmd *cobra.Command, args []string, extraArgs ...interface{}) {
+func (s *twitchService) queryUser(state *argo.State, extraArgs ...interface{}) error {
 	errChan := make(chan error)
 	respChan := make(chan *User)
 	ctx, cancel := context.WithTimeout(s.ctx, reqTimeOut)
+	user := state.Args()[0]
 	defer cancel()
-	go s.api.fetchUser(ctx, args[0], respChan, errChan)
+	go s.api.fetchUser(ctx, user, respChan, errChan)
 	select {
-	case user := <-respChan:
-		if user == nil {
-			cmd.Printf("Twitch user not found: %s", args[0])
-			return
+	case User := <-respChan:
+		if User == nil {
+			fmt.Fprintf(&state.OutputStr, "Twitch User not found: %s", user)
+			return nil
 		}
-		cmd.Printf(`== Twitch User ==
+		fmt.Fprintf(&state.OutputStr, `== Twitch User ==
 - Name: %s
 - User ID: %s
 - Login Name: %s
 - Channel Description:
 %s
 - Channel View Count: %d
-`, user.DisplayName, user.ID, user.Login, user.Description, user.ViewCount)
+`, User.DisplayName, User.ID, User.Login, User.Description, User.ViewCount)
 	case err := <-errChan:
 		s.logger.WithField("cmd", "queryUser").Error(err.Error())
-		cmd.Printf("Internal Error")
+		fmt.Fprintf(&state.OutputStr, "Internal Error")
 	case <-ctx.Done():
-		cmd.Printf("Request timeout, please try again later.")
+		fmt.Fprintf(&state.OutputStr, "Request timeout, please try again later.")
 	}
+
+	return nil
 }
 
-func (s *twitchService) queryStream(cmd *cobra.Command, args []string, extraArgs ...interface{}) {
+func (s *twitchService) queryStream(state *argo.State, extraArgs ...interface{}) error {
 	errChan := make(chan error)
 	respChan := make(chan Stream)
 	ctx, cancel := context.WithTimeout(s.ctx, reqTimeOut)
 	defer cancel()
-	go s.api.fetchStream(ctx, args[0], respChan, errChan)
+	user := state.Args()[0]
+	go s.api.fetchStream(ctx, user, respChan, errChan)
 	select {
 	case stream := <-respChan:
 		if !stream.Online {
-			cmd.Printf(`== Twitch Stream ==
-- User: %s, stream offline or user not found.
-`, args[0])
-			return
+			fmt.Fprintf(&state.OutputStr, `== Twitch Stream ==
+- User: %s, stream offline or User not found.
+`, user)
+			return nil
 		}
-		cmd.Printf(`== Twitch Stream ==
+		fmt.Fprintf(&state.OutputStr, `== Twitch Stream ==
 - Title: %s
 - Streamer: %s
 - Viewer Count: %d
 - Game: %s
-- Link: %s`, stream.Title, stream.UserName, stream.ViewerCount, stream.GameID, twitchURL+args[0])
+- Link: %s`, stream.Title, stream.UserName, stream.ViewerCount, stream.GameID, twitchURL+user)
 	case err := <-errChan:
 		s.logger.WithField("cmd", "queryStream").Error(err.Error())
-		cmd.Printf("Internal Error")
+		fmt.Fprintf(&state.OutputStr, "Internal Error")
 	case <-ctx.Done():
-		cmd.Printf("Request timeout, please try again later.")
+		fmt.Fprintf(&state.OutputStr, "Request timeout, please try again later.")
 	}
+	return nil
 }

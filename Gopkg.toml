@@ -23,10 +23,8 @@
 #   non-go = false
 #   go-tests = true
 #   unused-packages = true
-
-
 [[constraint]]
-  name = "github.com/KavenC/cobra"
+  name = "gitlab.com/kavenc/argo"
   branch = "master"
 
 [[constraint]]
@@ -61,4 +59,3 @@
   root-package = "gitlab.com/kavenc/telepathy"
   go-version = "1.11"
   install = ["./..."]
-  

@@ -5,13 +5,13 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/KavenC/cobra"
 	"github.com/sirupsen/logrus"
+	"gitlab.com/kavenc/argo"
 )
 
 type cmdManager struct {
 	session *Session
-	rootCmd *cobra.Command
+	rootCmd argo.Action
 	logger  *logrus.Entry
 }
 
@@ -30,44 +30,7 @@ type CmdExistsError struct {
 // CommandPrefix is the trigger word for the Telepathy command message
 const CommandPrefix = "teru"
 
-func rootCmd() *cobra.Command {
-	rootCmd := &cobra.Command{
-		Use:                   CommandPrefix,
-		DisableFlagsInUseLine: true,
-		Args:                  cobra.MinimumNArgs(1),
-		Run: func(*cobra.Command, []string, ...interface{}) {
-			// Do nothing
-		},
-	}
-	rootCmd.Flags().BoolP("help", "h", false, "Show help for telepathy messenger commands")
-	rootCmd.SetHelpTemplate(`== Telepathy messenger command interface ==
-{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
-{{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`)
-	rootCmd.SetUsageTemplate(`* Usage:
-  {{.CommandPath}} {{if .HasAvailableSubCommands}}[command]{{end}}{{if gt (len .Aliases) 0}}
-
-* Aliases:
-  {{.NameAndAliases}}{{end}}{{if .HasExample}}
-
-* Examples:
-{{.Example}}{{end}}{{if .HasAvailableSubCommands}}
-
-* Available Commands:{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
-
-* Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
-
-* Global Flags:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
-
-* Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
-
-Send "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
-`)
-	return rootCmd
-}
+var regexCmdSplitter = regexp.MustCompile(" +")
 
 func (e CmdExistsError) Error() string {
 	return e.Cmd + " already exists."
@@ -76,48 +39,57 @@ func (e CmdExistsError) Error() string {
 func newCmdManager(s *Session) *cmdManager {
 	return &cmdManager{
 		session: s,
-		rootCmd: rootCmd(),
+		rootCmd: argo.Action{Trigger: CommandPrefix},
 		logger:  logrus.WithField("module", "cmdManager"),
 	}
 }
 
 // RegisterCommand register a subcommand in telepathy command tree
-func (m *cmdManager) RegisterCommand(cmd *cobra.Command) error {
-	subcmds := m.rootCmd.Commands()
-	for _, subcmd := range subcmds {
-		if subcmd.Use == cmd.Use {
-			m.logger.Errorf("command: %s has already been registered", cmd.Use)
-			return CmdExistsError{Cmd: cmd.Use}
+func (m *cmdManager) RegisterCommand(cmd *argo.Action) error {
+	err := m.rootCmd.AddSubAction(*cmd)
+	if err != nil {
+		_, ok := err.(argo.DuplicatedSubActionError)
+		if ok {
+			m.logger.Errorf("command: %s has already been registered", cmd.Trigger)
+			return CmdExistsError{Cmd: cmd.Trigger}
 		}
+		m.logger.Errorf("RegisterCommand: %s", err.Error())
+		return err
 	}
-	m.rootCmd.AddCommand(cmd)
-	m.logger.Infof("registered command: %s", cmd.Use)
+	m.logger.Infof("registered command: %s", cmd.Trigger)
 	return nil
 }
 
 func (m *cmdManager) handleCmdMsg(ctx context.Context, message *InboundMessage) {
 	// Got a command message
 	// Parse it with command interface
-	args := regexp.MustCompile(" +").Split(message.Text, -1)[1:]
-
-	cmd := *m.rootCmd // make a copy to be goroutine safe
-
-	cmd.SetArgs(args)
-	var buffer strings.Builder
-	cmd.SetOutput(&buffer)
+	args := regexCmdSplitter.Split(message.Text, -1)
 
 	// Execute command
 	extraArgs := CmdExtraArgs{
 		Ctx:     ctx,
 		Message: message,
 	}
-	cmd.Execute(extraArgs)
 
-	// If there is stirng output, forward it back to messenger
-	if buffer.Len() > 0 {
+	state := &argo.State{}
+	err := m.rootCmd.Parse(state, args, extraArgs)
+	if err != nil {
+		m.logger.Errorf("handleCmdMsg: %s", err.Error())
 		replyMsg := &OutboundMessage{
 			TargetID: message.FromChannel.ChannelID,
-			Text:     buffer.String(),
+			Text:     "Internal Error",
+		}
+		msg, _ := m.session.Message.Messenger(message.FromChannel.MessengerID)
+		msg.Send(replyMsg)
+		return
+	}
+
+	// If there is stirng output, forward it back to messenger
+	reply := state.OutputStr.String()
+	if len(reply) > 0 {
+		replyMsg := &OutboundMessage{
+			TargetID: message.FromChannel.ChannelID,
+			Text:     reply,
 		}
 		msg, _ := m.session.Message.Messenger(message.FromChannel.MessengerID)
 		msg.Send(replyMsg)
@@ -125,9 +97,9 @@ func (m *cmdManager) handleCmdMsg(ctx context.Context, message *InboundMessage) 
 }
 
 // CommandEnsureDM checks if command is from direct message
-func CommandEnsureDM(cmd *cobra.Command, extraArgs CmdExtraArgs) bool {
+func CommandEnsureDM(state *argo.State, extraArgs CmdExtraArgs) bool {
 	if !extraArgs.Message.IsDirectMessage {
-		cmd.Print("This command can only be run with Direct Messages (Whispers).")
+		state.OutputStr.WriteString("This command can only be run with Direct Messages (Whispers).\n")
 		return false
 	}
 	return true

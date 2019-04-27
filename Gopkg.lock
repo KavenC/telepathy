@@ -2,14 +2,6 @@
 
 
 [[projects]]
-  branch = "master"
-  digest = "1:18e41649d91aee61ab395645835579b3b0be5eec0cf5f8eac5f589791316b23e"
-  name = "github.com/KavenC/cobra"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "445a6e5cfb8042c3af89e48b2b1c5f3e81c61926"
-
-[[projects]]
   digest = "1:fc4f149402c1fa7258290c3f91b0bfbc709763f3d3899609a2e4a0163dec65c6"
   name = "github.com/bwmarrin/discordgo"
   packages = ["."]
@@ -56,14 +48,6 @@
   pruneopts = "UT"
   revision = "66b9c49e59c6c48f0ffce28c2d8b8a5678502c6d"
   version = "v1.4.0"
-
-[[projects]]
-  digest = "1:870d441fe217b8e689d7949fef6e43efbc787e50f200cb1e70dbca9204a1d6be"
-  name = "github.com/inconshreveable/mousetrap"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "76626ae9c91c4f2a10f34cad8ce83ea42c93bb75"
-  version = "v1.0"
 
 [[projects]]
   digest = "1:0a69a1c0db3591fcefb47f115b224592c8dfa4368b7ba9fae509d5e16cdc95c8"
@@ -137,14 +121,6 @@
   version = "v1.3.0"
 
 [[projects]]
-  digest = "1:c1b1102241e7f645bc8e0c22ae352e8f0dc6484b6cb4d132fa9f24174e0119e2"
-  name = "github.com/spf13/pflag"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "298182f68c66c05229eb03ac171abe6e309ee79a"
-  version = "v1.0.3"
-
-[[projects]]
   branch = "master"
   digest = "1:40fdfd6ab85ca32b6935853bbba35935dcb1d796c8135efd85947566c76e662e"
   name = "github.com/xdg/scram"
@@ -159,6 +135,14 @@
   packages = ["."]
   pruneopts = "UT"
   revision = "73f8eece6fdcd902c185bf651de50f3828bed5ed"
+
+[[projects]]
+  branch = "master"
+  digest = "1:c5781e8f141eca5817a52e985ed9107a89659e131e8f0e633a694883e3542d62"
+  name = "gitlab.com/kavenc/argo"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "06ee40526b6d1640aec01837d64033afa23db8ea"
 
 [[projects]]
   branch = "master"
@@ -213,7 +197,6 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
-    "github.com/KavenC/cobra",
     "github.com/bwmarrin/discordgo",
     "github.com/go-redis/redis",
     "github.com/line/line-bot-sdk-go/linebot",
@@ -222,6 +205,7 @@
     "github.com/mongodb/mongo-go-driver/mongo/options",
     "github.com/peterhellberg/link",
     "github.com/sirupsen/logrus",
+    "gitlab.com/kavenc/argo",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

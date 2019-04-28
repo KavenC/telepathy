@@ -137,12 +137,12 @@
   revision = "73f8eece6fdcd902c185bf651de50f3828bed5ed"
 
 [[projects]]
-  branch = "helptext-format"
-  digest = "1:b3e50aa41b2d45ea24d5ec3dfbf526afb84b5f82c85577b88af57c0d3c14cf1c"
+  digest = "1:ca2aab36771c02212bb0064511c7ee7fc60ec15756fca5e66cd84b49a60b4352"
   name = "gitlab.com/kavenc/argo"
   packages = ["."]
   pruneopts = "UT"
-  revision = "6728e5273c36a53e9dc2895753442560690254f2"
+  revision = "c4b380ec79b732ba4a99abcd7d1bef49609a407c"
+  version = "v0.0.1"
 
 [[projects]]
   branch = "master"

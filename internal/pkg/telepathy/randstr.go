@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-const seeds = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+="
+const seeds = "ABCDFGHJKLMNOPQRSTUVWXYZ23456789"
 const (
-	seedBits       = 6
+	seedBits       = 5
 	seedMask       = 1<<seedBits - 1
 	seedSegmentMax = 63 / seedBits
 )

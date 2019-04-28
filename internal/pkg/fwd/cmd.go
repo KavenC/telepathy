@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis"
@@ -29,12 +30,14 @@ const funcKey = "fwd"
 
 // Session defines a structure for forwarding setup session
 type Session struct {
-	EntryType  string
-	FirstType  string
-	FirstID    string
-	SecondType string
-	SecondID   string
-	Cmd        int
+	EntryType   string
+	FirstType   string
+	FirstID     string
+	FirstAlias  string
+	SecondType  string
+	SecondID    string
+	SecondAlias string
+	Cmd         int
 }
 
 // Index defines a structure for setup channel for forwarding setup session
@@ -82,6 +85,8 @@ func (m *forwardingManager) CommandInterface() *argo.Action {
 		Trigger:    "2way",
 		ShortDescr: "Create two-way channel forwarding",
 		LongDescr:  "Setup message forwarding between 2 channels",
+		MinConsume: 2,
+		ArgNames:   []string{"channel-alias-1", "channel-alias-2"},
 		Do:         m.createTwoWay,
 	})
 
@@ -89,6 +94,8 @@ func (m *forwardingManager) CommandInterface() *argo.Action {
 		Trigger:    "1way",
 		ShortDescr: "Create one-way channel forwarding",
 		LongDescr:  "Setup message forwarding from 1 channel to another",
+		MinConsume: 2,
+		ArgNames:   []string{"channel-alias-1", "channel-alias-2"},
 		Do:         m.createOneWay,
 	})
 
@@ -271,13 +278,19 @@ func (m *forwardingManager) initSession(ctx context.Context, session *Session) (
 }
 
 func (m *forwardingManager) setupFwd(state *argo.State, session *Session, extraArgs telepathy.CmdExtraArgs) {
+	args := state.Args()
+	session.FirstAlias = args[0]
+	session.SecondAlias = args[1]
+	fmt.Fprintf(&state.OutputStr, "1st Channel: %s\n", args[0])
+	fmt.Fprintf(&state.OutputStr, "2nd Channel: %s\n", args[1])
+
 	key1, key2, err := m.initSession(extraArgs.Ctx, session)
 	prefix := telepathy.CommandPrefix
 
 	if err != nil {
 		state.OutputStr.WriteString(err.Error())
 	} else {
-		state.OutputStr.WriteString("Please follow these steps:\n")
+		state.OutputStr.WriteString("\nPlease follow these steps:\n")
 		state.OutputStr.WriteString("1. Make sure Telepathy is enabled in both channels\n")
 		fmt.Fprintf(&state.OutputStr, "2. Send: %s %s set %s to the 1st channel\n", prefix, funcKey, key1)
 		fmt.Fprintf(&state.OutputStr, "3. Send: %s %s set %s to the 2nd channel", prefix, funcKey, key2)
@@ -300,7 +313,7 @@ func (m *forwardingManager) createTwoWay(state *argo.State, extras ...interface{
 		Cmd:       twoWay,
 	}
 
-	state.OutputStr.WriteString("Setup two-way channel forwarding (1st Channel <-> 2nd Channel)")
+	state.OutputStr.WriteString("Setup two-way channel forwarding (1st Channel <-> 2nd Channel)\n")
 	m.setupFwd(state, &session, extraArgs)
 	return nil
 }
@@ -321,7 +334,7 @@ func (m *forwardingManager) createOneWay(state *argo.State, extras ...interface{
 		Cmd:       oneWay,
 	}
 
-	state.OutputStr.WriteString("Setup one-way channel forwarding (1st Channel -> 2nd Channel)")
+	state.OutputStr.WriteString("Setup one-way channel forwarding (1st Channel -> 2nd Channel)\n")
 	m.setupFwd(state, &session, extraArgs)
 	return nil
 }
@@ -388,7 +401,7 @@ func (m *forwardingManager) setKeyProcess(key, cid, msg string) func(*redis.Clie
 	// String returned by Action function should be used as command reply
 	return func(client *redis.Client) interface{} {
 		logger := logger.WithField("phase", "setKey")
-		errInvalidKey := "Invalid key, or key time out. Please restart setup process."
+		errInvalidKey := "Invalid key, or key time out. Please restart setup process"
 
 		// Get Index to find the Session to set channel info
 		cmdstr, err := client.Get(key).Result()
@@ -420,10 +433,10 @@ func (m *forwardingManager) setKeyProcess(key, cid, msg string) func(*redis.Clie
 			return errInvalidKey
 		}
 
-		errSameFwd := "Cannot create forwarding in the same channel.\n" +
-			"Please restart setup process."
-		errUnknown := "Internal Error. Please restart setup process."
-		ret := ""
+		errSameFwd := `Cannot create forwarding in the same channel
+Please restart setup process`
+		errUnknown := "Internal Error. Please restart setup process"
+		ret := strings.Builder{}
 		// Set channel info to Session field
 		switch ch := ind.Index; ch {
 		case firstCh:
@@ -433,7 +446,7 @@ func (m *forwardingManager) setKeyProcess(key, cid, msg string) func(*redis.Clie
 			}
 			session.FirstID = cid
 			session.FirstType = msg
-			ret += "Set as First Channel successfully."
+			fmt.Fprintf(&ret, "Successfully set this channel as: %s", session.FirstAlias)
 		case secondCh:
 			if session.FirstID == cid && session.FirstType == msg {
 				client.Del(ind.SessionKey)
@@ -441,17 +454,15 @@ func (m *forwardingManager) setKeyProcess(key, cid, msg string) func(*redis.Clie
 			}
 			session.SecondID = cid
 			session.SecondType = msg
-			ret += "Set as Second Channel successfully."
+			fmt.Fprintf(&ret, "Successfully set this channel as: %s", session.SecondAlias)
 		default:
 			logger.Errorf("Got invalid Index.Index: %v", ind)
 			return errUnknown
 		}
 
-		ret += "\n"
-
 		if session.FirstID == "" || session.SecondID == "" {
 			// If the other channel is not set, prompt user to continue the process
-			ret += "Please set another channel with provided key."
+			ret.WriteString("\nPlease set another channel with provided key")
 			jsonStr, err := json.Marshal(session)
 			if err != nil {
 				logger.Error("JSON Marshal Failed: " + err.Error())
@@ -487,7 +498,8 @@ func (m *forwardingManager) setKeyProcess(key, cid, msg string) func(*redis.Clie
 					"second_type":    session.SecondType,
 					"second_channel": session.SecondID,
 				}).Info("Creating one-way forwarding")
-				ret += m.createFwd(fch, sch, tch)
+				ret.WriteString("\n")
+				ret.WriteString(m.createFwd(fch, sch, tch))
 			case twoWay:
 				logger.WithFields(logrus.Fields{
 					"first_type":     session.FirstType,
@@ -495,15 +507,17 @@ func (m *forwardingManager) setKeyProcess(key, cid, msg string) func(*redis.Clie
 					"second_type":    session.SecondType,
 					"second_channel": session.SecondID,
 				}).Info("Creating two-way forwarding")
-				ret += m.createFwd(fch, sch, tch)
-				ret += "\n" + m.createFwd(sch, fch, tch)
+				ret.WriteString("\n")
+				ret.WriteString(m.createFwd(fch, sch, tch))
+				ret.WriteString("\n")
+				ret.WriteString(m.createFwd(sch, fch, tch))
 			default:
 				logger.Errorf("got invalid Cmd in Session: %v", session)
 				return errUnknown
 			}
 			m.writeToDB()
 		}
-		return ret
+		return ret.String()
 	}
 }
 

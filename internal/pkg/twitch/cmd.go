@@ -18,7 +18,7 @@ func (s *twitchService) CommandInterface() *argo.Action {
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "substream",
-		ShortDescr: "Get notification when the user's stream changes",
+		ShortDescr: "Subscribe to stream change",
 		ArgNames:   []string{"user-name"},
 		MinConsume: 1,
 		Do:         s.subStream,
@@ -26,7 +26,7 @@ func (s *twitchService) CommandInterface() *argo.Action {
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "unsubstream",
-		ShortDescr: "Unsubscribe to user's stream notifications",
+		ShortDescr: "Unsubscribe to stream change",
 		ArgNames:   []string{"user-name"},
 		MinConsume: 1,
 		Do:         s.unsubStream,

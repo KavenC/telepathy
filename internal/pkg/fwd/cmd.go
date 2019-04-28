@@ -80,19 +80,19 @@ func (m *forwardingManager) CommandInterface() *argo.Action {
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "2way",
-		ShortDescr: "Create two-way channel forwarding (DM only)",
+		ShortDescr: "Create two-way channel forwarding",
 		Do:         m.createTwoWay,
 	})
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "1way",
-		ShortDescr: "Create one-way channel forwarding (DM only)",
+		ShortDescr: "Create one-way channel forwarding",
 		Do:         m.createOneWay,
 	})
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "info",
-		ShortDescr: "Show message forwarding info (form/to).",
+		ShortDescr: "Show message forwarding info",
 		Do:         m.info,
 	})
 
@@ -101,7 +101,7 @@ func (m *forwardingManager) CommandInterface() *argo.Action {
 		MinConsume: 1,
 		MaxConsume: -1,
 		ArgNames:   []string{"channel-id", "channel-id"},
-		ShortDescr: "Stop receiving forwarded messages from specified channels",
+		ShortDescr: "Stop receiving forwarded messages",
 		Do:         m.delFrom,
 	})
 
@@ -110,13 +110,13 @@ func (m *forwardingManager) CommandInterface() *argo.Action {
 		MinConsume: 1,
 		MaxConsume: -1,
 		ArgNames:   []string{"channel-id", "channel-id"},
-		ShortDescr: "Stop forwarding messages to specified channels",
+		ShortDescr: "Stop forwarding messages",
 		Do:         m.delTo,
 	})
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "set",
-		ShortDescr: "Used for identify channel for various channel features",
+		ShortDescr: "Used for identify channel",
 		ArgNames:   []string{"hash"},
 		MinConsume: 1,
 		Do:         m.set,

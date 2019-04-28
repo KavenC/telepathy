@@ -74,7 +74,7 @@ func (e TerminatedError) Error() string {
 
 func (m *forwardingManager) CommandInterface() *argo.Action {
 	cmd := &argo.Action{
-		Trigger:    "fwd",
+		Trigger:    funcKey,
 		ShortDescr: "Cross-app Message Forwarding",
 	}
 
@@ -277,10 +277,10 @@ func (m *forwardingManager) setupFwd(state *argo.State, session *Session, extraA
 	if err != nil {
 		state.OutputStr.WriteString(err.Error())
 	} else {
-		state.OutputStr.WriteString(`
-1. Make sure Teruhashi is in both channels.
-2. Send "` + prefix + " fwd set " + key1 + `" to the first channel. (Without: ").
-3. Send "` + prefix + " fwd set " + key2 + `" to the second channel. (Without: ").`)
+		state.OutputStr.WriteString("Please follow these steps:\n")
+		state.OutputStr.WriteString("1. Make sure Telepathy is enabled in both channels\n")
+		fmt.Fprintf(&state.OutputStr, "2. Send: %s %s set %s to the 1st channel\n", prefix, funcKey, key1)
+		fmt.Fprintf(&state.OutputStr, "3. Send: %s %s set %s to the 2nd channel", prefix, funcKey, key2)
 	}
 }
 
@@ -300,7 +300,7 @@ func (m *forwardingManager) createTwoWay(state *argo.State, extras ...interface{
 		Cmd:       twoWay,
 	}
 
-	state.OutputStr.WriteString("Setup two-way channel forwarding in following steps:\n")
+	state.OutputStr.WriteString("Setup two-way channel forwarding (1st Channel <-> 2nd Channel)")
 	m.setupFwd(state, &session, extraArgs)
 	return nil
 }
@@ -321,7 +321,7 @@ func (m *forwardingManager) createOneWay(state *argo.State, extras ...interface{
 		Cmd:       oneWay,
 	}
 
-	state.OutputStr.WriteString("Setup one-way channel forwarding in following steps:\n")
+	state.OutputStr.WriteString("Setup one-way channel forwarding (1st Channel -> 2nd Channel)")
 	m.setupFwd(state, &session, extraArgs)
 	return nil
 }

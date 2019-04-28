@@ -23,11 +23,9 @@
 #   non-go = false
 #   go-tests = true
 #   unused-packages = true
-
-
 [[constraint]]
-  name = "github.com/KavenC/cobra"
-  branch = "master"
+  name = "gitlab.com/kavenc/argo"
+  version = "=0.0.1"
 
 [[constraint]]
   name = "github.com/bwmarrin/discordgo"
@@ -61,4 +59,3 @@
   root-package = "gitlab.com/kavenc/telepathy"
   go-version = "1.11"
   install = ["./..."]
-  

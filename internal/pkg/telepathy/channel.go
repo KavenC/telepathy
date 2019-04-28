@@ -3,11 +3,12 @@ package telepathy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/KavenC/cobra"
 	"github.com/sirupsen/logrus"
+	"gitlab.com/kavenc/argo"
 )
 
 const channelDelimiter = "@"
@@ -35,32 +36,29 @@ func (c *channelService) ID() string {
 	return channelServiceID
 }
 
-func (c *channelService) CommandInterface() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "channel",
-		Short: "Telepathy channel management",
-		Run: func(*cobra.Command, []string, ...interface{}) {
-			// Do nothing
-		},
+func (c *channelService) CommandInterface() *argo.Action {
+	cmd := &argo.Action{
+		Trigger:    "channel",
+		ShortDescr: "Telepathy Channel Management",
 	}
 
-	cmd.AddCommand(&cobra.Command{
-		Use:   "name",
-		Short: "Show the name of current channel.",
-		Run:   cmdChannelName,
+	cmd.AddSubAction(argo.Action{
+		Trigger:    "name",
+		ShortDescr: "Show the name of current channel",
+		Do:         cmdChannelName,
 	})
 
 	return cmd
 }
 
-func cmdChannelName(cmd *cobra.Command, args []string, extras ...interface{}) {
+func cmdChannelName(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(CmdExtraArgs)
 	if !ok {
 		logrus.WithField("module", "channel").Errorf("failed to parse extraArgs: %T", extras[0])
-		cmd.Print("Internal error. Command failed.")
-		return
+		return errors.New("failed to parse extraArgs")
 	}
-	cmd.Print(extraArgs.Message.FromChannel.Name())
+	state.OutputStr.WriteString(extraArgs.Message.FromChannel.Name())
+	return nil
 }
 
 // Name returns a formated name of a Channel object

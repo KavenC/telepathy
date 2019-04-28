@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/KavenC/cobra"
 	"github.com/sirupsen/logrus"
+	"gitlab.com/kavenc/argo"
 )
 
 // MsgrUserProfile holds the information of a messenger user
@@ -33,7 +33,7 @@ type OutboundMessage struct {
 // GlobalMessenger defines global interfaces of a messenger handler
 // These interfaces will be opened to external modules such as other Messenger handlers
 type GlobalMessenger interface {
-	Send(*OutboundMessage)
+	Send(*OutboundMessage) // Must be go-routine safe
 }
 
 // MessengerPlugin has to be embedded for Messenger plugins
@@ -101,7 +101,7 @@ func (e MessengerIllegalIDError) Error() string {
 
 // CommandInterface returns the command interface of a Messenger
 // The stub here makes it optional to implement this for Messenger plugins
-func (m *MessengerPlugin) CommandInterface() *cobra.Command {
+func (m *MessengerPlugin) CommandInterface() *argo.Action {
 	return nil
 }
 
@@ -188,10 +188,10 @@ func (m *MessageManager) RegisterMessageHandler(handler InboundMsgHandler) {
 
 func (m *MessageManager) rootMsgHandler(ctx context.Context, message InboundMessage) {
 	if isCmdMsg(message.Text) {
-		m.session.Command.handleCmdMsg(ctx, &message)
+		go m.session.Command.handleCmdMsg(ctx, &message)
 	} else {
 		for _, handler := range m.msgHandler {
-			handler(ctx, message)
+			go handler(ctx, message)
 		}
 	}
 }

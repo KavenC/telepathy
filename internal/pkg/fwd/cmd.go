@@ -81,12 +81,14 @@ func (m *forwardingManager) CommandInterface() *argo.Action {
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "2way",
 		ShortDescr: "Create two-way channel forwarding",
+		LongDescr:  "Setup message forwarding between 2 channels",
 		Do:         m.createTwoWay,
 	})
 
 	cmd.AddSubAction(argo.Action{
 		Trigger:    "1way",
 		ShortDescr: "Create one-way channel forwarding",
+		LongDescr:  "Setup message forwarding from 1 channel to another",
 		Do:         m.createOneWay,
 	})
 

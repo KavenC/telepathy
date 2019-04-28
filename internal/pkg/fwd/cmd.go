@@ -132,8 +132,8 @@ func allocate3Keys(redis *redis.Client) interface{} {
 	const (
 		count  = 3
 		retry  = 3
-		len    = 8
-		expire = time.Minute
+		len    = 5
+		expire = 3 * time.Minute
 	)
 
 	ret := struct {

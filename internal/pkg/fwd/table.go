@@ -2,8 +2,10 @@ package fwd
 
 import (
 	"context"
+	"errors"
 	"sync"
 
+	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/sirupsen/logrus"
 
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
@@ -11,11 +13,12 @@ import (
 
 const (
 	// Configurations
-	nameRetry   = 3
-	queueLen    = 10
+	nameRetry = 3
+	queueLen  = 10
 	// Action identifiers
 	tableInsert = 0
 	tableDelete = 1
+	tableBSON   = 2
 )
 
 // Alias is the alias information of a channel in forwarding table
@@ -67,6 +70,8 @@ func (ft *table) start(ctx context.Context) {
 					op.ret <- ft.insertImpl(op)
 				} else if op.action == tableDelete {
 					op.ret <- ft.deleteImpl(op)
+				} else if op.action == tableBSON {
+					op.ret <- ft.bsonImpl()
 				}
 			}
 		}
@@ -130,6 +135,18 @@ func (ft *table) getTo(from telepathy.Channel) channelList {
 		return nil
 	}
 	ret, _ := load.(channelList)
+	return ret
+}
+
+func (ft *table) bson() chan *bson.A {
+	op := tableOp{action: tableBSON, ret: make(chan interface{})}
+	ft.opQueue <- op
+	ret := make(chan *bson.A)
+	go func() {
+		opRet := <-op.ret
+		bs, _ := opRet.(*bson.A)
+		ret <- bs
+	}()
 	return ret
 }
 
@@ -211,4 +228,67 @@ func (ft *table) deleteImpl(op tableOp) bool {
 		ft.data.Store(op.key, toList)
 	}
 	return exists
+}
+
+func (ft *table) bsonImpl() *bson.A {
+	tableBSON := bson.A{}
+
+	// Table to BSON
+	ft.data.Range(func(key interface{}, value interface{}) bool {
+		chListBSON := bson.A{}
+		from, _ := key.(telepathy.Channel)
+		toList, _ := value.(channelList)
+		for toCh, alias := range toList {
+			chListBSON = append(chListBSON, bson.A{toCh, alias})
+		}
+		tableBSON = append(tableBSON, bson.A{from, chListBSON})
+		return true
+	})
+
+	return &tableBSON
+}
+
+// This function should only be used before start()
+func (ft *table) loadBSON(input bson.RawValue) error {
+	bsonArray, ok := input.ArrayOK()
+	if !ok {
+		return errors.New("bson.RawValue is not an array")
+	}
+
+	bsonElements, err := bsonArray.Elements()
+	if err != nil {
+		return err
+	}
+
+	for _, element := range bsonElements {
+		pair := element.Value().Array()
+		from := telepathy.Channel{}
+		err = pair.Index(0).Value().Unmarshal(&from)
+		if err != nil {
+			return err
+		}
+		rawArray := pair.Index(1).Value().Array()
+		rawList, err := rawArray.Elements()
+		if err != nil {
+			return err
+		}
+		list := make(channelList)
+		for _, rawCh := range rawList {
+			to := telepathy.Channel{}
+			alias := Alias{}
+			pair = rawCh.Value().Array()
+			err = pair.Index(0).Value().Unmarshal(&to)
+			if err != nil {
+				return err
+			}
+			err = pair.Index(1).Value().Unmarshal(&alias)
+			if err != nil {
+				return err
+			}
+			list[to] = alias
+		}
+		ft.data.Store(from, list)
+	}
+
+	return nil
 }

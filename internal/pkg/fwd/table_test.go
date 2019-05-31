@@ -1,10 +1,13 @@
 package fwd
 
 import (
+	"bytes"
 	"context"
 	"reflect"
 	"sync"
 	"testing"
+
+	"github.com/mongodb/mongo-go-driver/bson"
 
 	"github.com/sirupsen/logrus"
 
@@ -215,5 +218,82 @@ func TestTableInsertDuplicateAliasSrcRename(t *testing.T) {
 
 	if ret.DstAlias != "dst" {
 		t.Errorf("dst alias is wrong")
+	}
+}
+
+// check whether all elements from right map are in left map
+func mapContains(left, right *sync.Map) bool {
+	ret := true
+	right.Range(func(key, value interface{}) bool {
+		lvalue, ok := left.Load(key)
+		if !ok {
+			ret = false
+			return false
+		}
+		if !reflect.DeepEqual(lvalue, value) {
+			ret = false
+			return false
+		}
+		return true
+	})
+	return ret
+}
+
+func TestTableBSON(t *testing.T) {
+	tab, cancel := getTestTable()
+	defer cancel()
+	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
+	to := TableEntry{
+		telepathy.Channel{MessengerID: "msgA", ChannelID: "chB"},
+		Alias{SrcAlias: "src", DstAlias: "dst"},
+	}
+	<-tab.insert(from, to)
+
+	to = TableEntry{
+		telepathy.Channel{MessengerID: "msgA", ChannelID: "chC"},
+		Alias{SrcAlias: "src", DstAlias: "dst2"},
+	}
+	<-tab.insert(from, to)
+
+	from = telepathy.Channel{MessengerID: "msgB", ChannelID: "chA"}
+	to = TableEntry{
+		telepathy.Channel{MessengerID: "msgA", ChannelID: "chC"},
+		Alias{SrcAlias: "src2", DstAlias: "dst2"},
+	}
+	<-tab.insert(from, to)
+
+	bs := <-tab.bson()
+	bsByte, err := bson.Marshal(bson.D{bson.E{Key: "table", Value: *bs}})
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	bsReader := bytes.NewReader(bsByte)
+
+	bsRaw, err := bson.NewFromIOReader(bsReader)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	newTab := table{logger: logrus.WithField("module", "table_new")}
+	bsValue := bsRaw.Lookup("table")
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	newTab.loadBSON(bsValue)
+
+	newCtx, newCancel := context.WithCancel(context.Background())
+	defer newCancel()
+	newTab.start(newCtx)
+	loadedTo := newTab.getTo(from)
+
+	if len(loadedTo) != 1 {
+		t.Errorf("entry check failed, count")
+	}
+
+	if loadedTo[to.Channel] != to.Alias {
+		t.Errorf("entry check failed, content")
+	}
+
+	if !mapContains(&newTab.data, &tab.data) || !mapContains(&tab.data, &newTab.data) {
+		t.Errorf("table contents are not matched")
 	}
 }

@@ -142,16 +142,16 @@ func (m *forwardingManager) info(state *argo.State, extras ...interface{}) error
 	toChList := m.forwardingTo(extraArgs.Message.FromChannel)
 	if toChList != nil {
 		state.OutputStr.WriteString("= Messages are forwarding to:")
-		for toCh := range toChList {
-			fmt.Fprintf(&state.OutputStr, "\n%s", toCh.Name())
+		for toCh, alias := range toChList {
+			fmt.Fprintf(&state.OutputStr, "\n%s (%s)", alias.DstAlias, toCh.MessengerID)
 		}
 	}
 
 	fromChList := m.forwardingFrom(extraArgs.Message.FromChannel)
 	if fromChList != nil {
 		state.OutputStr.WriteString("\n\n= Receiving forwarded messages from:")
-		for fromCh := range fromChList {
-			fmt.Fprintf(&state.OutputStr, "\n%s", fromCh.Name())
+		for fromCh, alias := range fromChList {
+			fmt.Fprintf(&state.OutputStr, "\n%s (%s)", alias.SrcAlias, fromCh.MessengerID)
 		}
 	}
 

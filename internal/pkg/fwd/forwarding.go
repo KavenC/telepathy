@@ -53,15 +53,15 @@ func (m *forwardingManager) ID() string {
 func (m *forwardingManager) msgHandler(ctx context.Context, message telepathy.InboundMessage) {
 	toChList := m.forwardingTo(message.FromChannel)
 	if toChList != nil {
-		text := fmt.Sprintf("**[ %s | %s ]**\n%s",
-			message.FromChannel.MessengerID,
-			message.SourceProfile.DisplayName,
-			message.Text)
-		for toCh := range toChList {
+		for toCh, alias := range toChList {
 			outMsg := &telepathy.OutboundMessage{
 				TargetID: toCh.ChannelID,
 				Image:    message.Image,
 			}
+			text := fmt.Sprintf("**[ %s | %s ]**\n%s",
+				alias.SrcAlias,
+				message.SourceProfile.DisplayName,
+				message.Text)
 			if len(message.Text) != 0 || message.Image != nil {
 				outMsg.Text = text
 			}

@@ -3,9 +3,10 @@ package fwd
 import (
 	"context"
 	"fmt"
-	"reflect"
 
+	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
+	"github.com/mongodb/mongo-go-driver/mongo/options"
 	"github.com/sirupsen/logrus"
 
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
@@ -16,7 +17,7 @@ const dbTableName = "fwdtable"
 type forwardingManager struct {
 	telepathy.ServicePlugin
 	session *telepathy.Session
-	table   *telepathy.ChannelListMap
+	table   table
 	context context.Context
 	logger  *logrus.Entry
 }
@@ -28,17 +29,21 @@ func init() {
 func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
 	manager := &forwardingManager{
 		session: param.Session,
-		table:   telepathy.NewChannelListMap(),
+		table:   table{logger: param.Logger.WithField("component", "table")},
 		logger:  param.Logger,
 	}
 	manager.session.Message.RegisterMessageHandler(manager.msgHandler)
 	return manager, nil
 }
 
-func (m *forwardingManager) Start(context context.Context) {
-	m.context = context
+func (m *forwardingManager) Start(ctx context.Context) {
+	m.context = ctx
 	// Load forwarding table from DB
-	<-m.loadFromDB()
+	err := m.loadFromDB()
+	if err != nil {
+		m.logger.Errorf("Table LoadDB failed: %s", err.Error())
+	}
+	m.table.start(m.context)
 }
 
 func (m *forwardingManager) ID() string {
@@ -46,17 +51,17 @@ func (m *forwardingManager) ID() string {
 }
 
 func (m *forwardingManager) msgHandler(ctx context.Context, message telepathy.InboundMessage) {
-	toChList := m.forwardingTo(message.FromChannel)
+	toChList := m.table.getTo(message.FromChannel)
 	if toChList != nil {
-		text := fmt.Sprintf("**[ %s | %s ]**\n%s",
-			message.FromChannel.MessengerID,
-			message.SourceProfile.DisplayName,
-			message.Text)
-		for toCh := range toChList {
+		for toCh, alias := range toChList {
 			outMsg := &telepathy.OutboundMessage{
 				TargetID: toCh.ChannelID,
 				Image:    message.Image,
 			}
+			text := fmt.Sprintf("**[ %s | %s ]**\n%s",
+				alias.SrcAlias,
+				message.SourceProfile.DisplayName,
+				message.Text)
 			if len(message.Text) != 0 || message.Image != nil {
 				outMsg.Text = text
 			}
@@ -66,36 +71,15 @@ func (m *forwardingManager) msgHandler(ctx context.Context, message telepathy.In
 	}
 }
 
-func (m *forwardingManager) forwardingTo(from telepathy.Channel) telepathy.ChannelList {
-	load, ok := m.table.GetList(from)
-	if !ok {
-		return nil
-	}
-	return load
-}
-
-func (m *forwardingManager) forwardingFrom(to telepathy.Channel) telepathy.ChannelList {
-	ret := make(telepathy.ChannelList)
-	m.table.Range(func(key interface{}, toList telepathy.ChannelList) bool {
-		if toList[to] {
-			from, _ := key.(telepathy.Channel)
-			ret[from] = true
-		}
-		return true
-	})
-
-	if len(ret) == 0 {
-		return nil
-	}
-	return ret
-}
-
 func (m *forwardingManager) writeToDB() chan interface{} {
 	retCh := make(chan interface{}, 1)
+	bsonChan := m.table.bson()
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
+			tableBSON := bson.M{"ID": dbTableName, "Table": *(<-bsonChan)}
 			collection := db.Collection(funcKey)
-			result, err := m.table.StoreToDB(ctx, collection, dbTableName)
+			result, err := collection.ReplaceOne(ctx,
+				map[string]string{"ID": dbTableName}, tableBSON, options.Replace().SetUpsert(true))
 			if err != nil {
 				m.logger.Error("error when writing table back to DB: " + err.Error())
 			}
@@ -106,21 +90,27 @@ func (m *forwardingManager) writeToDB() chan interface{} {
 	return retCh
 }
 
-func (m *forwardingManager) loadFromDB() chan interface{} {
-	m.table = telepathy.NewChannelListMap()
+func (m *forwardingManager) loadFromDB() error {
 	retCh := make(chan interface{}, 1)
 	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			collection := db.Collection(funcKey)
-			err := m.table.LoadFromDB(ctx, collection, dbTableName, reflect.TypeOf(telepathy.Channel{}))
+			result := collection.FindOne(ctx, map[string]string{"ID": dbTableName})
+			raw, err := result.DecodeBytes()
 			if err != nil {
-				m.logger.Errorf("load from DB failed: %s", err.Error())
 				return err
 			}
-			m.logger.Info("load from DB done")
-			return nil
+			return raw.Lookup("Table")
 		},
 		Return: retCh,
 	})
-	return retCh
+
+	// Wait until DB operation is done
+	result := <-retCh
+	if err, ok := result.(error); ok {
+		return err
+	}
+
+	bsonValue, _ := result.(bson.RawValue)
+	return m.table.loadBSON(bsonValue)
 }

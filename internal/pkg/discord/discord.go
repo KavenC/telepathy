@@ -7,6 +7,7 @@ package discord
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -98,11 +99,18 @@ func (m *messenger) Start(ctx context.Context) {
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {
 	var err error
+	text := strings.Builder{}
+	if message.AsName != "" {
+		fmt.Fprintf(&text, "**[ %s ]**\n%s", message.AsName, message.Text)
+	} else {
+		text.WriteString(message.Text)
+	}
+
 	if message.Image != nil {
 		_, err = m.bot.ChannelMessageSendComplex(
 			message.TargetID,
 			&discordgo.MessageSend{
-				Content: message.Text,
+				Content: text.String(),
 				File: &discordgo.File{
 					Name:        "sent-from-telepathy.png", // always use png, just to make discord show the image
 					ContentType: message.Image.Type,
@@ -112,7 +120,7 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 		)
 	} else {
 		if len(message.Text) > 0 {
-			_, err = m.bot.ChannelMessageSend(message.TargetID, message.Text)
+			_, err = m.bot.ChannelMessageSend(message.TargetID, text.String())
 		}
 	}
 

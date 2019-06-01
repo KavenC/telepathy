@@ -56,15 +56,11 @@ func (m *forwardingManager) msgHandler(ctx context.Context, message telepathy.In
 		for toCh, alias := range toChList {
 			outMsg := &telepathy.OutboundMessage{
 				TargetID: toCh.ChannelID,
+				AsName:   fmt.Sprintf("%s | %s", alias.SrcAlias, message.SourceProfile.DisplayName),
+				Text:     message.Text,
 				Image:    message.Image,
 			}
-			text := fmt.Sprintf("**[ %s | %s ]**\n%s",
-				alias.SrcAlias,
-				message.SourceProfile.DisplayName,
-				message.Text)
-			if len(message.Text) != 0 || message.Image != nil {
-				outMsg.Text = text
-			}
+
 			msgr, _ := m.session.Message.Messenger(toCh.MessengerID)
 			msgr.Send(outMsg)
 		}

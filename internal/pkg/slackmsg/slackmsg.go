@@ -107,15 +107,28 @@ func (m *messenger) Start(ctx context.Context) {
 }
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {
-	m.bot.PostMessage(message.TargetID, slack.MsgOptionText(message.Text, false))
+	var options []slack.MsgOption
+	text := strings.Builder{}
+	text.WriteString(message.Text)
 	if message.Image != nil {
 		imgURL, err := message.Image.FullURL()
 		if err == nil {
-			m.bot.PostMessage(message.TargetID, slack.MsgOptionText(imgURL, false))
+			if text.Len() > 0 {
+				fmt.Fprintf(&text, "\n%s", imgURL)
+			} else {
+				text.WriteString(imgURL)
+			}
 		} else {
 			m.logger.Warnf("image get FullURL failed: %s", err.Error())
 		}
 	}
+
+	options = append(options, slack.MsgOptionText(text.String(), false))
+	if message.AsName != "" {
+		options = append(options, slack.MsgOptionUsername(message.AsName))
+	}
+
+	m.bot.PostMessage(message.TargetID, options...)
 }
 
 func (m *messenger) verifyRequest(header http.Header, body []byte) bool {

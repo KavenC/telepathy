@@ -6,8 +6,10 @@ package line
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/line/line-bot-sdk-go/linebot"
@@ -85,11 +87,24 @@ func (m *messenger) Start(ctx context.Context) {
 }
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {
-
 	messages := []linebot.SendingMessage{}
 
-	if message.Text != "" {
-		messages = append(messages, linebot.NewTextMessage(message.Text))
+	if message.Text == "" && message.Image == nil {
+		return
+	}
+
+	text := strings.Builder{}
+	if message.AsName != "" {
+		fmt.Fprintf(&text, "[ %s ]", message.AsName)
+		if message.Text != "" {
+			fmt.Fprintf(&text, "\n%s", message.Text)
+		}
+	} else {
+		text.WriteString(message.Text)
+	}
+
+	if text.Len() > 0 {
+		messages = append(messages, linebot.NewTextMessage(text.String()))
 	}
 
 	if message.Image != nil {

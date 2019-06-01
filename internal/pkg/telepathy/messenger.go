@@ -25,9 +25,10 @@ type InboundMessage struct {
 
 // OutboundMessage models a message send to Client (through messenger)
 type OutboundMessage struct {
-	TargetID string
-	Text     string
-	Image    *Image
+	TargetID string // The Channel ID this message should be sent to
+	AsName   string // Sent the message as the specified user name
+	Text     string // Message content
+	Image    *Image // Image to be sent along with the message
 }
 
 // GlobalMessenger defines global interfaces of a messenger handler

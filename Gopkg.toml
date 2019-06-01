@@ -47,6 +47,10 @@
   name = "github.com/sirupsen/logrus"
   version = "1.3.0"
 
+[[constraint]]
+  name = "github.com/nlopes/slack"
+  branch = "master"
+
 [prune]
   go-tests = true
   unused-packages = true

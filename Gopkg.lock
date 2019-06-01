@@ -105,12 +105,34 @@
   version = "v0.3.0"
 
 [[projects]]
+  branch = "master"
+  digest = "1:30346c986343c51d732b0868166ffd0d3d26b33db518e81e32993737515cf64f"
+  name = "github.com/nlopes/slack"
+  packages = [
+    ".",
+    "internal/errorsx",
+    "internal/timex",
+    "slackevents",
+    "slackutilsx",
+  ]
+  pruneopts = "UT"
+  revision = "e2954b1409b0228b16a1ac3515a036a3f2f4aac1"
+
+[[projects]]
   digest = "1:e8fcad58263a7511225a674d9c23b9c55aa2f8616e2dab59f184a516f55c6566"
   name = "github.com/peterhellberg/link"
   packages = ["."]
   pruneopts = "UT"
   revision = "d1cebc7ea14a5fc0de7cb4a45acae773161642c6"
   version = "v1.0.0"
+
+[[projects]]
+  digest = "1:cf31692c14422fa27c83a05292eb5cbe0fb2775972e8f1f8446a71549bd8980b"
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "ba968bfe8b2f7e042a574c888954fccecfa385b4"
+  version = "v0.8.1"
 
 [[projects]]
   digest = "1:fd61cf4ae1953d55df708acb6b91492d538f49c305b364a014049914495db426"
@@ -202,6 +224,8 @@
     "github.com/mongodb/mongo-go-driver/bson",
     "github.com/mongodb/mongo-go-driver/mongo",
     "github.com/mongodb/mongo-go-driver/mongo/options",
+    "github.com/nlopes/slack",
+    "github.com/nlopes/slack/slackevents",
     "github.com/peterhellberg/link",
     "github.com/sirupsen/logrus",
     "gitlab.com/kavenc/argo",

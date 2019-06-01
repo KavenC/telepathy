@@ -66,7 +66,7 @@ func TestTableDelete(t *testing.T) {
 	}
 	<-tab.insert(from, to)
 
-	ret := <-tab.delete(from, to)
+	ret := <-tab.delete(from, to.Channel)
 	if !ret {
 		t.Error("delete failed")
 	}
@@ -83,7 +83,7 @@ func TestTableDeleteNonExistsTo(t *testing.T) {
 	<-tab.insert(from, to)
 	to.MessengerID = "msgB"
 
-	ret := <-tab.delete(from, to)
+	ret := <-tab.delete(from, to.Channel)
 	if ret {
 		t.Error("delete failed")
 	}
@@ -100,7 +100,7 @@ func TestTableDeleteNonExistsFrom(t *testing.T) {
 	<-tab.insert(from, to)
 	from.MessengerID = "msgB"
 
-	ret := <-tab.delete(from, to)
+	ret := <-tab.delete(from, to.Channel)
 	if ret {
 		t.Error("delete failed")
 	}

@@ -204,7 +204,7 @@ func (m *forwardingManager) delFrom(state *argo.State, extras ...interface{}) er
 	change := false
 	for _, fromChName := range state.Args() {
 		fromCh := telepathy.NewChannel(fromChName)
-		if !m.table.DelChannel(*fromCh, thisCh) {
+		if !<-m.table.delete(*fromCh, thisCh) {
 			fmt.Fprintf(&state.OutputStr, "Message forwarding from: %s does not exist\n", fromChName)
 			continue
 		}
@@ -236,7 +236,7 @@ func (m *forwardingManager) delTo(state *argo.State, extras ...interface{}) erro
 	change := false
 	for _, toChName := range state.Args() {
 		toCh := telepathy.NewChannel(toChName)
-		if !m.table.DelChannel(thisCh, *toCh) {
+		if !<-m.table.delete(thisCh, *toCh) {
 			fmt.Fprintf(&state.OutputStr, "Message forwarding to: %s doesnot exist\n", toChName)
 			continue
 		}

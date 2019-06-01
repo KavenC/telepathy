@@ -208,29 +208,47 @@ func (m *forwardingManager) setupFwd(state *argo.State, session Session, extraAr
 }
 
 // try create fwd between from and to, and outputting messages for the results
-func (m *forwardingManager) createFwd(from, to, this telepathy.Channel) string {
-	ok := m.table.AddChannel(from, to)
+func (m *forwardingManager) createFwd(from, to, this telepathy.Channel, alias Alias) string {
+	insertRet := <-m.table.insert(from,
+		TableEntry{
+			Channel: to,
+			Alias:   alias,
+		})
 	var ret string
 
-	if !ok {
-		return fmt.Sprintf("Forwarding from %s to %s already exists.", from.Name(), to.Name())
+	if !insertRet.ok {
+		return fmt.Sprintf("Forwarding from %s to %s already exists.", alias.SrcAlias, alias.DstAlias)
 	}
 
-	fromMsg := "Start forwarding messages to " + to.Name()
-	toMsg := "Receiving forwarded messages from " + from.Name()
+	fromMsg := strings.Builder{}
+	fromMsg.WriteString("Start forwarding messages to ")
+	fromMsg.WriteString(insertRet.DstAlias)
+	if alias.DstAlias != insertRet.DstAlias {
+		fromMsg.WriteString(" (renamed from ")
+		fromMsg.WriteString(alias.DstAlias)
+		fromMsg.WriteString(")")
+	}
+	toMsg := strings.Builder{}
+	toMsg.WriteString("Receiving forwarded messages from ")
+	toMsg.WriteString(insertRet.SrcAlias)
+	if alias.SrcAlias != insertRet.SrcAlias {
+		toMsg.WriteString(" (renamed from ")
+		toMsg.WriteString(alias.SrcAlias)
+		toMsg.WriteString(")")
+	}
 	outMsg := &telepathy.OutboundMessage{}
 
 	// Send notifications to related channels
 	// if the channel is the key-setting channel, return the notification string rather than send it directly
 	var msgrHandler telepathy.GlobalMessenger
 	if from == this {
-		ret = fromMsg
-		outMsg.Text = toMsg
+		ret = fromMsg.String()
+		outMsg.Text = toMsg.String()
 		outMsg.TargetID = to.ChannelID
 		msgrHandler, _ = m.session.Message.Messenger(to.MessengerID)
 	} else {
-		ret = toMsg
-		outMsg.Text = fromMsg
+		ret = toMsg.String()
+		outMsg.Text = fromMsg.String()
 		outMsg.TargetID = from.ChannelID
 		msgrHandler, _ = m.session.Message.Messenger(from.MessengerID)
 	}
@@ -325,15 +343,27 @@ Setup process is terminated`
 			})
 			switch cmd := session.Cmd; cmd {
 			case oneWay:
+				alias := Alias{
+					SrcAlias: session.FirstAlias,
+					DstAlias: session.SecondAlias,
+				}
 				preCreateLog.Info("Creating one-way forwarding")
 				ret.WriteString("\n")
-				ret.WriteString(m.createFwd(session.First, session.Second, channel))
+				ret.WriteString(m.createFwd(session.First, session.Second, channel, alias))
 			case twoWay:
+				alias := Alias{
+					SrcAlias: session.FirstAlias,
+					DstAlias: session.SecondAlias,
+				}
 				preCreateLog.Info("Creating two-way forwarding")
 				ret.WriteString("\n")
-				ret.WriteString(m.createFwd(session.First, session.Second, channel))
+				ret.WriteString(m.createFwd(session.First, session.Second, channel, alias))
 				ret.WriteString("\n")
-				ret.WriteString(m.createFwd(session.Second, session.First, channel))
+				alias = Alias{
+					SrcAlias: session.SecondAlias,
+					DstAlias: session.FirstAlias,
+				}
+				ret.WriteString(m.createFwd(session.Second, session.First, channel, alias))
 			default:
 				preCreateLog.Errorf("got invalid Cmd in Session: %v", session)
 				return errUnknown

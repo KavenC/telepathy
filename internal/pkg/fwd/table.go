@@ -97,11 +97,11 @@ func (ft *table) insert(from telepathy.Channel, to TableEntry) chan insertRet {
 	return ret
 }
 
-func (ft *table) delete(from telepathy.Channel, to TableEntry) chan bool {
+func (ft *table) delete(from, to telepathy.Channel) chan bool {
 	op := tableOp{
 		action: tableDelete,
 		key:    from,
-		entry:  to,
+		entry:  TableEntry{Channel: to},
 		ret:    make(chan interface{}),
 	}
 

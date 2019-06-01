@@ -139,7 +139,7 @@ func (m *forwardingManager) info(state *argo.State, extras ...interface{}) error
 		return errors.New("failed to parse extraArgs")
 	}
 
-	toChList := m.forwardingTo(extraArgs.Message.FromChannel)
+	toChList := m.table.getTo(extraArgs.Message.FromChannel)
 	if toChList != nil {
 		state.OutputStr.WriteString("= Messages are forwarding to:")
 		for toCh, alias := range toChList {
@@ -147,7 +147,7 @@ func (m *forwardingManager) info(state *argo.State, extras ...interface{}) error
 		}
 	}
 
-	fromChList := m.forwardingFrom(extraArgs.Message.FromChannel)
+	fromChList := m.table.getFrom(extraArgs.Message.FromChannel)
 	if fromChList != nil {
 		state.OutputStr.WriteString("\n\n= Receiving forwarded messages from:")
 		for fromCh, alias := range fromChList {
@@ -193,6 +193,20 @@ func (m *forwardingManager) set(state *argo.State, extras ...interface{}) error 
 	return nil
 }
 
+func sliceUniqify(input []string) []string {
+	uniqueMap := make(map[string]bool)
+	output := make([]string, 0, len(input))
+	for _, value := range input {
+		_, ok := uniqueMap[value]
+		if ok {
+			continue
+		}
+		uniqueMap[value] = true
+		output = append(output, value)
+	}
+	return output
+}
+
 func (m *forwardingManager) delFrom(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
@@ -200,22 +214,30 @@ func (m *forwardingManager) delFrom(state *argo.State, extras ...interface{}) er
 		return errors.New("failed to parse extraArgs")
 	}
 	thisCh := extraArgs.Message.FromChannel
+	uniqueArgs := sliceUniqify(state.Args())
 
 	change := false
-	for _, fromChName := range state.Args() {
-		fromCh := telepathy.NewChannel(fromChName)
-		if !<-m.table.delete(*fromCh, thisCh) {
+	fromList := m.table.getFrom(thisCh)
+	aliasMap := make(map[string]telepathy.Channel)
+	for fromCh, alias := range fromList {
+		aliasMap[alias.SrcAlias] = fromCh
+	}
+
+	for _, fromChName := range uniqueArgs {
+		fromCh, ok := aliasMap[fromChName]
+		toChName := fromList[fromCh].DstAlias
+		if ok && <-m.table.delete(fromCh, thisCh) {
+			fmt.Fprintf(&state.OutputStr, "Stop receiving messages from: %s\n", fromChName)
+			messenger, _ := m.session.Message.Messenger(fromCh.MessengerID)
+			msg := telepathy.OutboundMessage{
+				TargetID: fromCh.ChannelID,
+				Text:     fmt.Sprintf("Message forwarding to: %s has been stopped\n", toChName),
+			}
+			messenger.Send(&msg)
+			change = true
+		} else {
 			fmt.Fprintf(&state.OutputStr, "Message forwarding from: %s does not exist\n", fromChName)
-			continue
 		}
-		fmt.Fprintf(&state.OutputStr, "Stop receiving messages from: %s\n", fromChName)
-		messenger, _ := m.session.Message.Messenger(fromCh.MessengerID)
-		msg := telepathy.OutboundMessage{
-			TargetID: fromCh.ChannelID,
-			Text:     fmt.Sprintf("Message forwarding to: %s has been stopped\n", thisCh.Name()),
-		}
-		messenger.Send(&msg)
-		change = true
 	}
 
 	if change {
@@ -232,22 +254,30 @@ func (m *forwardingManager) delTo(state *argo.State, extras ...interface{}) erro
 		return errors.New("failed to parse extraArgs")
 	}
 	thisCh := extraArgs.Message.FromChannel
+	uniqueArgs := sliceUniqify(state.Args())
 
 	change := false
-	for _, toChName := range state.Args() {
-		toCh := telepathy.NewChannel(toChName)
-		if !<-m.table.delete(thisCh, *toCh) {
+	toList := m.table.getTo(thisCh)
+	aliasMap := make(map[string]telepathy.Channel)
+	for toCh, alias := range toList {
+		aliasMap[alias.DstAlias] = toCh
+	}
+
+	for _, toChName := range uniqueArgs {
+		toCh, ok := aliasMap[toChName]
+		fromChName := toList[toCh].SrcAlias
+		if ok && <-m.table.delete(thisCh, toCh) {
+			fmt.Fprintf(&state.OutputStr, "Stop forwarding messages to: %s\n", toChName)
+			messenger, _ := m.session.Message.Messenger(toCh.MessengerID)
+			msg := telepathy.OutboundMessage{
+				TargetID: toCh.ChannelID,
+				Text:     fmt.Sprintf("Message forwarding from: %s has been stopped\n", fromChName),
+			}
+			messenger.Send(&msg)
+			change = true
+		} else {
 			fmt.Fprintf(&state.OutputStr, "Message forwarding to: %s doesnot exist\n", toChName)
-			continue
 		}
-		fmt.Fprintf(&state.OutputStr, "Stop forwarding messages to: %s\n", toChName)
-		messenger, _ := m.session.Message.Messenger(toCh.MessengerID)
-		msg := telepathy.OutboundMessage{
-			TargetID: toCh.ChannelID,
-			Text:     fmt.Sprintf("Message forwarding from: %s has been stopped\n", thisCh.Name()),
-		}
-		messenger.Send(&msg)
-		change = true
 	}
 
 	if change {

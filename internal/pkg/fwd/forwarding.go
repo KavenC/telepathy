@@ -51,7 +51,7 @@ func (m *forwardingManager) ID() string {
 }
 
 func (m *forwardingManager) msgHandler(ctx context.Context, message telepathy.InboundMessage) {
-	toChList := m.forwardingTo(message.FromChannel)
+	toChList := m.table.getTo(message.FromChannel)
 	if toChList != nil {
 		for toCh, alias := range toChList {
 			outMsg := &telepathy.OutboundMessage{
@@ -69,14 +69,6 @@ func (m *forwardingManager) msgHandler(ctx context.Context, message telepathy.In
 			msgr.Send(outMsg)
 		}
 	}
-}
-
-func (m *forwardingManager) forwardingTo(from telepathy.Channel) channelList {
-	return m.table.getTo(from)
-}
-
-func (m *forwardingManager) forwardingFrom(to telepathy.Channel) channelList {
-	return m.table.getFrom(to)
 }
 
 func (m *forwardingManager) writeToDB() chan interface{} {

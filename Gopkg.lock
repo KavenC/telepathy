@@ -105,8 +105,8 @@
   version = "v0.3.0"
 
 [[projects]]
-  branch = "master"
-  digest = "1:30346c986343c51d732b0868166ffd0d3d26b33db518e81e32993737515cf64f"
+  branch = "tokens-revoked-event"
+  digest = "1:6b1faa8509783c8aa8a3fa6ff7f1d4187b61ad882f1edb1e379ff292bc323bb3"
   name = "github.com/nlopes/slack"
   packages = [
     ".",
@@ -116,7 +116,8 @@
     "slackutilsx",
   ]
   pruneopts = "UT"
-  revision = "e2954b1409b0228b16a1ac3515a036a3f2f4aac1"
+  revision = "c0b2f3d8bc8e116d134780a41d4c165a03f6a7a5"
+  source = "https://github.com/kavenc/slack.git"
 
 [[projects]]
   digest = "1:e8fcad58263a7511225a674d9c23b9c55aa2f8616e2dab59f184a516f55c6566"

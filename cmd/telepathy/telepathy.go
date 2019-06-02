@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/discord"
 	_ "gitlab.com/kavenc/telepathy/internal/pkg/fwd"
+	_ "gitlab.com/kavenc/telepathy/internal/pkg/info"
 	"gitlab.com/kavenc/telepathy/internal/pkg/line"
 	"gitlab.com/kavenc/telepathy/internal/pkg/slackmsg"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"

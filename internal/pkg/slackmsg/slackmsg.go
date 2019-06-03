@@ -32,7 +32,10 @@ const (
 	ID = "SLACK"
 )
 
-var validSubType = map[string]bool{"": true, "file_share": true}
+var validSubType = map[string]bool{
+	"":           true,
+	"file_share": true,
+}
 
 type appInfo struct {
 	clientID      string
@@ -121,6 +124,18 @@ func (m *messenger) Start(ctx context.Context) {
 }
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {
+	channel, err := newUniqueChannel(message.TargetID)
+	if err != nil {
+		m.logger.WithField("phase", "send").Errorf("invalid target ID: %s (%s)", message.TargetID, err.Error())
+		return
+	}
+
+	info, ok := m.botInfoMap[channel.TeamID]
+	if !ok {
+		m.logger.WithField("phase", "send").Errorf("unauthorized team: %s", channel.TeamID)
+		return
+	}
+
 	var options []slack.MsgOption
 	text := strings.Builder{}
 	text.WriteString(message.Text)
@@ -142,10 +157,8 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 		options = append(options, slack.MsgOptionUsername(message.AsName))
 	}
 
-	target := strings.Split(message.TargetID, " ")
-	channel := target[0]
-	bot := slack.New(target[1])
-	bot.PostMessage(channel, options...)
+	bot := slack.New(info.accessToken)
+	bot.PostMessage(channel.ChannelID, options...)
 }
 
 func (m *messenger) verifyRequest(header http.Header, body []byte) bool {
@@ -236,10 +249,15 @@ func (m *messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
 		return
 	}
 
+	uniqueChannelID, err := unqiueChannel{TeamID: teamID, ChannelID: ev.Channel}.encode()
+	if err != nil {
+		m.logger.Errorf("failed to create uniqueChannel: %s", err.Error())
+		return
+	}
 	message := telepathy.InboundMessage{
 		FromChannel: telepathy.Channel{
 			MessengerID: m.ID(),
-			ChannelID:   fmt.Sprintf("%s %s", ev.Channel, teamID),
+			ChannelID:   uniqueChannelID,
 		},
 		SourceProfile:   &srcProfile,
 		Text:            ev.Text,

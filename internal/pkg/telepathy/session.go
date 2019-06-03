@@ -124,6 +124,7 @@ func (s *Session) Start(ctx context.Context) {
 
 	//Start Webhook handling server
 	logrus.WithField("module", "session").Info("starting web server")
+	s.WebServer.finalize()
 	go s.WebServer.ListenAndServe()
 
 	// Wait here until the session is Done

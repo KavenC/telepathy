@@ -213,6 +213,7 @@ func (m *messenger) createImgContent(bot *slack.Client, file slackevents.File) *
 func (m *messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
 	info, ok := m.botInfoMap[teamID]
 	if !ok {
+		m.logger.Warnf("received from unknwon team: %s", teamID)
 		return
 	}
 

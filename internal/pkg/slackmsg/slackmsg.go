@@ -43,18 +43,12 @@ type appInfo struct {
 	signingSecret []byte
 }
 
-type botInfo struct {
-	botID       string
-	botUserID   string
-	accessToken string
-}
-
 type messenger struct {
 	telepathy.MessengerPlugin
 	session    *telepathy.Session
 	handler    telepathy.InboundMsgHandler
 	ctx        context.Context
-	botInfoMap map[string]botInfo
+	botInfoMap botInfoMap
 	app        appInfo
 	logger     *logrus.Entry
 }
@@ -111,16 +105,18 @@ func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
 		return nil, InitError{msg: "invalid config: CLIENT_SECRET"}
 	}
 
-	msgr.botInfoMap = make(map[string]botInfo)
-
-	param.Session.WebServer.RegisterWebhook("slack-callback", msgr.webhook)
-	param.Session.WebServer.RegisterWebhook("slack-oauth", msgr.oauth)
-
 	return &msgr, nil
 }
 
 func (m *messenger) Start(ctx context.Context) {
 	m.ctx = ctx
+	m.botInfoMap = botInfoMap{}
+	if err := m.readBotInfoFromDB(); err != nil {
+		m.logger.Warnf("load bot info failed: %s", err.Error())
+	}
+
+	m.session.WebServer.RegisterWebhook("slack-callback", m.webhook)
+	m.session.WebServer.RegisterWebhook("slack-oauth", m.oauth)
 }
 
 func (m *messenger) Send(message *telepathy.OutboundMessage) {
@@ -157,7 +153,7 @@ func (m *messenger) Send(message *telepathy.OutboundMessage) {
 		options = append(options, slack.MsgOptionUsername(message.AsName))
 	}
 
-	bot := slack.New(info.accessToken)
+	bot := slack.New(info.AccessToken)
 	bot.PostMessage(channel.ChannelID, options...)
 }
 
@@ -220,7 +216,7 @@ func (m *messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
 		return
 	}
 
-	if ev.BotID == info.botID {
+	if ev.BotID == info.BotID {
 		// skip self messages
 		return
 	}
@@ -231,10 +227,10 @@ func (m *messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
 		return
 	}
 
-	bot := slack.New(info.accessToken)
+	bot := slack.New(info.AccessToken)
 	srcProfile := telepathy.MsgrUserProfile{}
 	if ev.BotID != "" {
-		srcProfile.ID = info.botUserID
+		srcProfile.ID = info.BotUserID
 		srcProfile.DisplayName = ev.Username
 	} else if ev.User != "" {
 		srcProfile.ID = ev.User
@@ -322,6 +318,7 @@ func (m *messenger) webhook(response http.ResponseWriter, request *http.Request)
 		case *slackevents.TokensRevokedEvent:
 			m.logger.Infof("tokens revoked, team: %s", eventsAPIEvent.TeamID)
 			delete(m.botInfoMap, eventsAPIEvent.TeamID)
+			go func() { <-m.writeBotInfoToDB() }()
 		}
 	}
 }
@@ -350,11 +347,12 @@ func (m *messenger) oauth(response http.ResponseWriter, request *http.Request) {
 				logger.Warnf("TeamID exists: %s, Info: %+v", oauthResp.TeamID, oldInfo)
 			}
 			info := botInfo{
-				accessToken: oauthResp.Bot.BotAccessToken,
-				botUserID:   oauthResp.Bot.BotUserID}
-			userInfo, _ := slack.New(info.accessToken).GetUserInfo(info.botUserID)
-			info.botID = userInfo.Profile.BotID
+				AccessToken: oauthResp.Bot.BotAccessToken,
+				BotUserID:   oauthResp.Bot.BotUserID}
+			userInfo, _ := slack.New(info.AccessToken).GetUserInfo(info.BotUserID)
+			info.BotID = userInfo.Profile.BotID
 			m.botInfoMap[oauthResp.TeamID] = info
+			go func() { <-m.writeBotInfoToDB() }()
 
 			response.Write([]byte("Telepathy has been added to your team"))
 			response.WriteHeader(http.StatusOK)

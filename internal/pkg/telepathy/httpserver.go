@@ -76,9 +76,12 @@ func (server *httpServer) init(port string) error {
 	logger := logrus.WithFields(logrus.Fields{
 		"module": "httpServer",
 	})
-	logger.Infof("httpServer init port: %s", port)
-
+	logger.Infof("httpServer port: %s", port)
 	server.Addr = ":" + port
+	return nil
+}
+
+func (server *httpServer) finalize() {
 	mux := server.serveMux()
 
 	// Add a simple response at root
@@ -86,8 +89,6 @@ func (server *httpServer) init(port string) error {
 		fmt.Fprint(response, "Telepathy Bot is Running")
 	})
 	server.Handler = mux
-
-	return nil
 }
 
 func (server *httpServer) webhookURL() *url.URL {

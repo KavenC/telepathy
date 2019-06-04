@@ -38,6 +38,8 @@ func main() {
 	config.MessengerConfigTable[slackmsg.ID] = make(telepathy.PluginConfig)
 	config.MessengerConfigTable[slackmsg.ID]["BOT_TOKEN"] = os.Getenv("SLACK_BOT_TOKEN")
 	config.MessengerConfigTable[slackmsg.ID]["SIGNING_SECRET"] = os.Getenv("SLACK_SIGNING_SECRET")
+	config.MessengerConfigTable[slackmsg.ID]["CLIENT_ID"] = os.Getenv("SLACK_CLIENT_ID")
+	config.MessengerConfigTable[slackmsg.ID]["CLIENT_SECRET"] = os.Getenv("SLACK_CLIENT_SECRET")
 
 	// Setup Service Configs
 	config.ServiceConfigTable[twitch.ID] = make(telepathy.PluginConfig)

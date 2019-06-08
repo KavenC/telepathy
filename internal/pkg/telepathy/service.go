@@ -2,6 +2,7 @@ package telepathy
 
 import (
 	"github.com/sirupsen/logrus"
+	"gitlab.com/kavenc/argo"
 )
 
 // ServiceCtorParam is the data structured pass to ServiceCtor
@@ -14,16 +15,19 @@ type ServiceCtorParam struct {
 // ServiceCtor is constructor function used to create a Service instance
 type ServiceCtor func(*ServiceCtorParam) (Service, error)
 
-// Service implements backend logics behind Messenger handlers
+// Service implements backend logics
 type Service interface {
 	plugin
+	GlobalService
 }
 
 // ServicePlugin has to be inhereted for service plugins
 type ServicePlugin struct{}
 
 // GlobalService hides functions of Service for external usage
-type GlobalService interface{}
+type GlobalService interface {
+	CommandInterface() *argo.Action
+}
 
 var serviceCtors map[string]ServiceCtor
 

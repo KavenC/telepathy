@@ -162,11 +162,6 @@ func newMessageManager(session *Session, configTable map[string]PluginConfig) *M
 
 		manager.messengers[ID] = messenger
 
-		// Register command interfaces
-		if cmd := messenger.CommandInterface(); cmd != nil {
-			manager.session.Command.RegisterCommand(cmd)
-		}
-
 		logger.WithField("messenger", ID).Infof("constructed messenger: %s", ID)
 	}
 	return &manager

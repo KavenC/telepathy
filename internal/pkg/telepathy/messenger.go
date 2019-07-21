@@ -3,9 +3,16 @@ package telepathy
 import (
 	"context"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
-	"gitlab.com/kavenc/argo"
+)
+
+const (
+	msgrSvcChannelTimeout = 10 * time.Millisecond
+	msgrMsgChannelTimeout = 10 * time.Millisecond
+	cmdChannelName        = "telepathy.cmd"
 )
 
 // MsgrUserProfile holds the information of a messenger user
@@ -23,35 +30,41 @@ type InboundMessage struct {
 	Image           *Image
 }
 
-// OutboundMessage models a message send to Client (through messenger)
+// OutboundMessage models a message send to user (through messenger)
 type OutboundMessage struct {
-	TargetID string // The Channel ID this message should be sent to
-	AsName   string // Sent the message as the specified user name
-	Text     string // Message content
-	Image    *Image // Image to be sent along with the message
+	ToChannel Channel
+	AsName    string // Sent the message as the specified user name
+	Text      string // Message content
+	Image     *Image // Image to be sent along with the message
 }
-
-// GlobalMessenger defines global interfaces of a messenger handler
-// These interfaces will be opened to external modules such as other Messenger handlers
-type GlobalMessenger interface {
-	Send(*OutboundMessage) // Must be go-routine safe
-}
-
-// MessengerPlugin has to be embedded for Messenger plugins
-type MessengerPlugin struct{}
 
 // Messenger defines the interface of a messenger handler
 // Theses interfaces are accessed only by Telepathy framework
 type Messenger interface {
 	plugin
-	GlobalMessenger
+	// GetSendChannel returns an input channel used to sent OutboundMessage.
+	// The OutboundMessage will then be sent out through the Messenger to the specified channel.
+	// Messenger Plugin MUST:
+	// 1. NOT closing this channel
+	// 2. Guarantee that returning the same channel every time
+	// Messenger Plugin SHOULD:
+	// 1. Avoid blocking sending. Sending can be cancelled if being blocked too long
+	GetSendChannel() chan<- OutboundMessage
 }
 
-// MessageManager manages messenger modules
-type MessageManager struct {
+// MessengerManager manages messenger modules
+type MessengerManager struct {
+	// MessengerID -> Messenger Object
 	messengers map[string]Messenger
-	msgHandler []InboundMsgHandler
-	session    *Session
+	// MessengerID -> Message receive channel
+	receivers map[string]chan InboundMessage
+	// ServiceID -> Inbound Message Channel
+	handlers map[string]chan<- InboundMessage
+	// ServiceID -> Outbound Message Channel
+	senders map[string]chan OutboundMessage
+	ctx     context.Context
+	cancel  context.CancelFunc
+	session *Session
 }
 
 // MessengerExistsError indicates registering Messenger with a id that already exists in the list
@@ -72,21 +85,18 @@ type MessengerIllegalIDError struct {
 // MsgrCtorParam is the parameter for MessengerCtor
 // This is used to pass framework information to Messenger modules
 type MsgrCtorParam struct {
-	Session    *Session
-	Config     PluginConfig
-	MsgHandler InboundMsgHandler
-	Logger     *logrus.Entry
+	Session  *Session
+	Config   PluginConfig
+	Receiver chan<- InboundMessage
+	Logger   *logrus.Entry
 }
-
-// InboundMsgHandler defines the signature of unified inbound message handler
-// Every Messenger implementation should call this function for all received messages
-type InboundMsgHandler func(context.Context, InboundMessage)
 
 // MessengerCtor defines the signature of Messenger module constructor
 // Messenger implementation need to register the constructor to the Telepathy framework
-type MessengerCtor func(*MsgrCtorParam) (Messenger, error)
+type MessengerCtor func(MsgrCtorParam) (Messenger, error)
 
 var msgrCtors map[string]MessengerCtor
+var msgLogger = logrus.WithField("module", "messengerManager")
 
 func (e MessengerExistsError) Error() string {
 	return "Messenger: " + e.ID + " has already been registered"
@@ -100,15 +110,9 @@ func (e MessengerIllegalIDError) Error() string {
 	return "Illegal messenger ID: " + e.ID
 }
 
-// CommandInterface returns the command interface of a Messenger
-// The stub here makes it optional to implement this for Messenger plugins
-func (m *MessengerPlugin) CommandInterface() *argo.Action {
-	return nil
-}
-
-// RegisterMessenger registers a Messenger handler
+// RegisterMessenger registers a constructor of Messenger plugin
 func RegisterMessenger(ID string, ctor MessengerCtor) error {
-	logger := logrus.WithField("module", "messageManager").WithField("messenger", ID)
+	logger := msgLogger.WithField("ID", ID)
 	if msgrCtors == nil {
 		msgrCtors = make(map[string]MessengerCtor)
 	}
@@ -128,66 +132,196 @@ func RegisterMessenger(ID string, ctor MessengerCtor) error {
 	return nil
 }
 
-func newMessageManager(session *Session, configTable map[string]PluginConfig) *MessageManager {
-	logger := logrus.WithField("module", "messageManager")
-	manager := MessageManager{
+func newMessengerManager(session *Session, configTable map[string]PluginConfig) *MessengerManager {
+	logger := msgLogger.WithField("phase", "new")
+
+	manager := MessengerManager{
 		messengers: make(map[string]Messenger),
+		receivers:  make(map[string]chan InboundMessage),
+		handlers:   make(map[string]chan<- InboundMessage),
+		senders:    make(map[string]chan OutboundMessage),
 		session:    session,
 	}
-	param := MsgrCtorParam{
-		Session:    session,
-		MsgHandler: manager.rootMsgHandler,
-	}
+
+	manager.ctx, manager.cancel = context.WithCancel(context.Background())
+
+	// Create a channel specifically for returning root help text
+	manager.createSendChannel(cmdChannelName)
 
 	for ID, ctor := range msgrCtors {
-		param := param
-		param.Logger = logrus.WithField("messenger", ID)
-		config, configExists := configTable[ID]
-		if !configExists {
-			logger.WithField("messenger", ID).Warnf("config for %s does not exist", ID)
+		recv := make(chan InboundMessage)
+		manager.receivers[ID] = recv
+		param := MsgrCtorParam{
+			Session:  session,
+			Config:   configTable[ID], // Note, if config does not exists, by default we will feed a empty Config{} to the messenger constructor
+			Receiver: manager.receivers[ID],
+			Logger:   logrus.WithFields(logrus.Fields{"plugin": "messenger", "ID": ID}),
 		}
-		param.Config = config
-		messenger, err := ctor(&param)
+
+		messenger, err := ctor(param)
 		if err != nil {
-			logger.WithField("messenger", ID).Errorf("failed to construct: %s", err.Error())
+			logger.WithField("ID", ID).Errorf("failed to construct: %s", err.Error())
 			continue
 		}
 
 		// Constructucted plugin id must be matching the registered id
 		if ID != messenger.ID() {
-			logger.WithField("messenger", ID).Errorf("regisered ID: %s but created as ID: %s. not constructed.",
+			logger.WithField("ID", ID).Errorf("regisered ID: %s but created as ID: %s. not constructed.",
 				ID, messenger.ID())
 			continue
 		}
 
 		manager.messengers[ID] = messenger
 
-		logger.WithField("messenger", ID).Infof("constructed messenger: %s", ID)
+		logger.WithField("ID", ID).Info("constructed")
 	}
 	return &manager
 }
 
-// Messenger gets a registered messenger handler with ID
-func (m *MessageManager) Messenger(ID string) (GlobalMessenger, error) {
-	msg := m.messengers[ID]
-	if msg == nil {
-		return nil, MessengerInvalidError{ID: ID}
+func (m *MessengerManager) startMessengers() {
+	for _, msgr := range m.messengers {
+		go msgr.Start()
 	}
-	return msg, nil
 }
 
-// RegisterMessageHandler register a InboundMsgHandler
-// The callback will be called when receiving messages from any Messenger
-func (m *MessageManager) RegisterMessageHandler(handler InboundMsgHandler) {
-	m.msgHandler = append(m.msgHandler, handler)
+func (m *MessengerManager) inboundRoutine() {
+	inMsgCh := make(chan InboundMessage)
+	allClosed := sync.WaitGroup{}
+	allClosed.Add(len(m.receivers))
+
+	// Aggregate inbound messages from Messengers
+	for msgr, rvc := range m.receivers {
+		go func() {
+			for msg := range rvc {
+				inMsgCh <- msg
+			}
+			// Receiver is closed by Messenger
+			allClosed.Done()
+		}()
+	}
+
+	// If all recivers are closed, close the aggregated channel
+	go func() {
+		allClosed.Wait()
+		close(inMsgCh)
+	}()
+
+	for msg := range inMsgCh {
+		m.rootMsgHandler(msg)
+	}
+
+	// If reach here, all receivers are closed and there are no more inbound messages need to be handled
+	// we can now close all service and cmd channels
+	for svc, handler := range m.handlers {
+		close(handler)
+	}
 }
 
-func (m *MessageManager) rootMsgHandler(ctx context.Context, message InboundMessage) {
-	if isCmdMsg(message.Text) {
-		go m.session.Command.handleCmdMsg(ctx, &message)
-	} else {
-		for _, handler := range m.msgHandler {
-			go handler(ctx, message)
+func (m *MessengerManager) outbooundRoutine() {
+	outMsgCh := make(chan OutboundMessage)
+	allClosed := sync.WaitGroup{}
+	allClosed.Add(len(m.senders))
+	for svc, send := range m.senders {
+		go func() {
+			for msg := range send {
+				outMsgCh <- msg
+			}
+			allClosed.Done()
+		}()
+	}
+
+	// If all senders are closed, close the aggregated channel
+	go func() {
+		allClosed.Wait()
+		close(outMsgCh)
+	}()
+
+	logger := msgLogger.WithField("phase", "outbound")
+	for msg := range outMsgCh {
+		msgr, ok := m.messengers[msg.ToChannel.MessengerID]
+		if !ok {
+			logger.Errorf("invalid messenger id: %s", msg.ToChannel.MessengerID)
+			continue
 		}
+
+		channel := msgr.GetSendChannel()
+		if channel == nil {
+			logger.WithField("ID", msg.ToChannel.MessengerID).Errorf("invalid sender channel")
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(m.ctx, msgrMsgChannelTimeout)
+		select {
+		case msgr.GetSendChannel() <- msg:
+			cancel()
+		case <-ctx.Done():
+			logger.WithField("ID", msg.ToChannel.MessengerID).Warnf("send timeout")
+		}
+	}
+
+	// All senders are closed, close messenger channels
+	for _, msgr := range m.messengers {
+		close(msgr.GetSendChannel())
+	}
+}
+
+func (m *MessengerManager) start() {
+	allStop := sync.WaitGroup{}
+	allStop.Add(2)
+	go func() {
+		m.inboundRoutine()
+		allStop.Done()
+	}()
+	go func() {
+		m.outbooundRoutine()
+		allStop.Done()
+	}()
+	allStop.Wait()
+	// Returns only if everything is done
+}
+
+func (m *MessengerManager) shutdown() {
+	// Cancelling root context for MessengerManager, this should
+	// cancel all send requests to
+	// 1. Message handlers
+	// 2. Command handlers
+	// 3. Messenger outbound channel
+	// Note that the writing channels are not closed until upstream channels are closed
+	m.cancel()
+}
+
+func (m *MessengerManager) createSendChannel(ID string) chan<- OutboundMessage {
+	m.senders[ID] = make(chan OutboundMessage)
+	return m.senders[ID]
+}
+
+func (m *MessengerManager) addHandler(serviceID string, ch chan<- InboundMessage) {
+	m.handlers[serviceID] = ch
+}
+
+func (m *MessengerManager) rootMsgHandler(message InboundMessage) {
+	if isCmdMsg(message.Text) {
+		m.session.Command.handleCmdMsg(m.ctx, message, m.senders[cmdChannelName])
+	} else {
+		for svc, handler := range m.handlers {
+			go func() {
+				ctx, cancel := context.WithTimeout(m.ctx, msgrSvcChannelTimeout)
+				defer cancel()
+				select {
+				case handler <- message:
+				case <-ctx.Done():
+					msgLogger.WithFields(logrus.Fields{
+						"phase":  "handler",
+						"serice": svc}).Warnf("handler timeout")
+				}
+			}()
+		}
+	}
+}
+
+// Reply constructs an OutboundMessage targeting to the channel where the InboundMessage came from
+func (im InboundMessage) Reply() OutboundMessage {
+	return OutboundMessage{
+		ToChannel: im.FromChannel,
 	}
 }

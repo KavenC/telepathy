@@ -43,15 +43,15 @@ func (c *channelService) CommandInterface() *argo.Action {
 	}
 
 	cmd.AddSubAction(argo.Action{
-		Trigger:    "name",
+		Trigger:    "info",
 		ShortDescr: "Show the name of current channel",
-		Do:         cmdChannelName,
+		Do:         cmdChannelInfo,
 	})
 
 	return cmd
 }
 
-func cmdChannelName(state *argo.State, extras ...interface{}) error {
+func cmdChannelInfo(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(CmdExtraArgs)
 	if !ok {
 		logrus.WithField("module", "channel").Errorf("failed to parse extraArgs: %T", extras[0])

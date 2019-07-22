@@ -1,4 +1,4 @@
-package telepathy
+package randstr
 
 import (
 	"math/rand"

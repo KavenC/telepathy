@@ -2,6 +2,7 @@ package telepathy
 
 import (
 	"context"
+	"net/url"
 
 	"gitlab.com/kavenc/argo"
 
@@ -12,7 +13,7 @@ import (
 // Plugins may optionally implement other functions by implement intefaces below
 type Plugin interface {
 	// Id returns the unique id for the plugin
-	Id() string
+	ID() string
 
 	// SetLogger will be called in init stage to provide logger for the plugin
 	SetLogger(*logrus.Entry)
@@ -43,6 +44,7 @@ type PluginCommandHandler interface {
 // PluginWebhookHandler defines the necessary functions if a plugin is handling webhook
 type PluginWebhookHandler interface {
 	Webhook() map[string]HTTPHandler
+	SetWebhookURL(map[string]*url.URL)
 }
 
 // PluginMsgConsumer defines the necesaary functions if a plugin handles inbound messages

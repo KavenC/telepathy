@@ -28,17 +28,17 @@ const (
 // | Messenger Plugin |                        | Router |                      | Service Plugin |
 // +------------------+  <-- transmitterOut -- +--------+ <-- transmitterIn -- +----------------+
 type router struct {
-	receiverIn    map[string]<-chan InboundMessage
-	receiverOut   map[string]chan InboundMessage
-	transmitterIn map[string]<-chan OutboundMessage
-	trasmitterOut map[string]chan OutboundMessage
-	cmdOut        chan InboundMessage
-	cmd           *cmdManager
-	logger        *logrus.Entry
+	receiverIn     map[string]<-chan InboundMessage
+	receiverOut    map[string]chan InboundMessage
+	transmitterIn  map[string]<-chan OutboundMessage
+	transmitterOut map[string]chan OutboundMessage
+	cmdOut         chan InboundMessage
+	cmd            *cmdManager
+	logger         *logrus.Entry
 }
 
 func newRouter() *router {
-	rt = &router{
+	rt := &router{
 		receiverIn:     make(map[string]<-chan InboundMessage),
 		receiverOut:    make(map[string]chan InboundMessage),
 		transmitterIn:  make(map[string]<-chan OutboundMessage),
@@ -47,31 +47,31 @@ func newRouter() *router {
 		logger:         logrus.WithField("module", "router"),
 	}
 	cmd := newCmdManager(rt.cmdOut)
-	rt.registerTransmitter("telepathy.cmd", cmd.msgOut)
+	rt.attachProducer("telepathy.cmd", cmd.msgOut)
 	rt.cmd = cmd
 	return rt
 }
 
-func (r *router) registerReceiver(id string, ch <-chan InboundMessage) {
+func (r *router) attachReceiver(id string, ch <-chan InboundMessage) {
 	_, ok := r.receiverIn[id]
 	if ok {
-		r.logger.Panicf("receiver has already been registered: %s", id)
+		r.logger.Panicf("receiver has already been attached: %s", id)
 	}
 	r.receiverIn[id] = ch
 }
 
-func (r *router) registerTransmitter(id string, ch <-chan OutboundMessage) {
+func (r *router) attachProducer(id string, ch <-chan OutboundMessage) {
 	_, ok := r.transmitterIn[id]
 	if ok {
-		r.logger.Panicf("transmitter has already been registered: &s", id)
+		r.logger.Panicf("producer has already been attached: %s", id)
 	}
 	r.transmitterIn[id] = ch
 }
 
-func (r *router) attachReceiver(id string) <-chan InboundMessage {
+func (r *router) attachConsumer(id string) <-chan InboundMessage {
 	_, ok := r.receiverOut[id]
 	if ok {
-		r.logger.Panicf("receiver has already been attached: %s", id)
+		r.logger.Panicf("consumer has already been attached: %s", id)
 	}
 	r.receiverOut[id] = make(chan InboundMessage, routerRecvOutLen)
 	return r.receiverOut[id]
@@ -93,13 +93,14 @@ func (r *router) receiver(ctx context.Context) {
 	inMsgCh := make(chan InboundMessage, routerRecvHandleLen)
 
 	// Collect Inbound Messages from all registered channels
-	for id, inCh := range r.receiverIn {
-		go func() {
-			for msg := range inCh {
-				inMsgCh <- msg
-			}
-			wg.Done()
-		}()
+	forward := func(ch <-chan InboundMessage) {
+		for msg := range ch {
+			inMsgCh <- msg
+		}
+		wg.Done()
+	}
+	for _, inCh := range r.receiverIn {
+		go forward(inCh)
 	}
 
 	// Close handling channel when all inbound channels are closed
@@ -130,7 +131,7 @@ func (r *router) receiver(ctx context.Context) {
 
 	// If reach here, the handling channel is emptied and closed
 	// Close all outbound channels
-	for id, ch := range r.receiverOut {
+	for _, ch := range r.receiverOut {
 		close(ch)
 	}
 }
@@ -142,13 +143,14 @@ func (r *router) transmitter(ctx context.Context) {
 	outMsgCh := make(chan OutboundMessage, routerTranHandleLen)
 
 	// Collect outbound messages
-	for id, ch := range r.transmitterIn {
-		go func() {
-			for msg := range ch {
-				outMsgCh <- msg
-			}
-			wg.Done()
-		}()
+	forward := func(ch <-chan OutboundMessage) {
+		for msg := range ch {
+			outMsgCh <- msg
+		}
+		wg.Done()
+	}
+	for _, ch := range r.transmitterIn {
+		go forward(ch)
 	}
 
 	// Close handling channel when all outbound message channels are closed
@@ -169,13 +171,13 @@ func (r *router) transmitter(ctx context.Context) {
 		timeout, cancel := context.WithTimeout(ctx, routerTranOutTimeout)
 		select {
 		case ch <- msg:
-		case timeout.Done():
+		case <-timeout.Done():
 			logger.Warnf("transmitter out timeout/cancelled: %s", id)
 		}
 		cancel()
 	}
 
-	for id, ch := range r.transmitterOut {
+	for _, ch := range r.transmitterOut {
 		close(ch)
 	}
 }

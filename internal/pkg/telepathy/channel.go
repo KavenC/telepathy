@@ -15,7 +15,9 @@ const channelDelimiter = "@"
 const channelServiceID = "telepathy.channel"
 
 type channelService struct {
-	ServicePlugin
+	Plugin
+	PluginCommandHandler
+	logger *logrus.Entry
 }
 
 // Channel is an abstract type for a communication session of a messenger APP
@@ -24,16 +26,16 @@ type Channel struct {
 	ChannelID   string
 }
 
-func newChannelService(*ServiceCtorParam) (Service, error) {
-	return &channelService{}, nil
+func (c *channelService) ID() string {
+	return channelServiceID
+}
+
+func (c *channelService) SetLogger(logger *logrus.Entry) {
+	c.logger = logger
 }
 
 func (c *channelService) Start(context context.Context) {
 	return
-}
-
-func (c *channelService) ID() string {
-	return channelServiceID
 }
 
 func (c *channelService) CommandInterface() *argo.Action {

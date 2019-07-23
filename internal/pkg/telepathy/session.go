@@ -3,7 +3,6 @@ package telepathy
 import (
 	"context"
 	"net/url"
-	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -127,24 +126,17 @@ func (s *Session) initPlugin() {
 // Start starts a Telepathy session
 // The function always returns an error when the seesion is terminated
 func (s *Session) Start(ctx context.Context) {
-	logrus.Info("session start")
+	logrus.Info("session starting")
 
-	var wg sync.WaitGroup
 	// Start backend services
 	logrus.Info("starting backend services")
-	wg.Add(2)
-	// Start redis
-	go func() {
-		s.redis.start(ctx)
-		wg.Done()
-	}()
+	go s.redis.start(ctx)
+	go s.db.start(ctx)
 
-	// Start database
-	go func() {
-		s.db.start(ctx)
-		wg.Done()
-	}()
-	wg.Wait()
+	// Start plugins
+	for _, plugin := range s.plugins {
+		go plugin.Start(ctx)
+	}
 
 	//Start Webhook handling server
 	logrus.WithField("module", "session").Info("starting web server")

@@ -63,4 +63,4 @@
 [metadata.heroku]
   root-package = "gitlab.com/kavenc/telepathy"
   go-version = "1.11"
-  install = ["./..."]
+  install = ["./cmd/..."]

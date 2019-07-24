@@ -1,7 +1,6 @@
 package telepathy
 
 import (
-	"context"
 	"net/url"
 
 	"gitlab.com/kavenc/argo"
@@ -20,8 +19,10 @@ type Plugin interface {
 
 	// Start is the main routine of the plugin
 	// this function only returns when the plugin is terminated
-	// terminating could be signled by cancelling the context
-	Start(context.Context)
+	Start()
+
+	// Stop triggers termination of the plugin
+	Stop()
 }
 
 // PluginMessenger defines the necessary functions for a messenger plugin

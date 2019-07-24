@@ -72,11 +72,12 @@ func (server *httpServer) serveMux() *http.ServeMux {
 	return &mux
 }
 
-func (server *httpServer) init(port string) error {
-	logger := logrus.WithFields(logrus.Fields{
-		"module": "httpServer",
-	})
-	logger.Infof("httpServer port: %s", port)
+func (server *httpServer) init(urlstr string, port string) error {
+	var err error
+	server.uRL, err = url.Parse(urlstr)
+	if err != nil {
+		return err
+	}
 	server.Addr = ":" + port
 	return nil
 }

@@ -20,27 +20,23 @@ import (
 // ID is a unique string to identify this Messenger handler
 const ID = "DISCORD"
 
-type messenger struct {
-	telepathy.MessengerPlugin
-	session *telepathy.Session
-	handler telepathy.InboundMsgHandler
-	ctx     context.Context
-	bot     *discordgo.Session
-	logger  *logrus.Entry
+type Messenger struct {
+	telepathy.Plugin
+	telepathy.PluginMessenger
+
+	bot    *discordgo.Session
+	logger *logrus.Entry
 }
 
-// InitError indicates an error when initializing Discord messenger handler
-type InitError struct {
-	msg string
+func (m *Messenger) ID() string{
+	return "DISCORD"
 }
 
-func init() {
-	telepathy.RegisterMessenger(ID, new)
+func (m *Messenger) SetLogger(logger *logrus.Entry) {
+	m.logger = logger
 }
 
-func (e InitError) Error() string {
-	return "Discord init failed: " + e.msg
-}
+func (m *Messenger)
 
 func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
 	msgr := messenger{

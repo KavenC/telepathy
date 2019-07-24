@@ -86,13 +86,14 @@ func (r *router) attachTransmitter(id string) <-chan OutboundMessage {
 	return r.transmitterOut[id]
 }
 
-func (r *router) receiver(ctx context.Context) {
+func (r *router) receiver() {
 	logger := r.logger.WithField("phase", "receiver")
+	logger.Info("started")
+
+	// Collect Inbound Messages from all registered channels
 	wg := sync.WaitGroup{}
 	wg.Add(len(r.receiverIn))
 	inMsgCh := make(chan InboundMessage, routerRecvHandleLen)
-
-	// Collect Inbound Messages from all registered channels
 	forward := func(ch <-chan InboundMessage) {
 		for msg := range ch {
 			inMsgCh <- msg
@@ -119,7 +120,7 @@ func (r *router) receiver(ctx context.Context) {
 
 		// Forward message to all listeners
 		for id, ch := range r.receiverOut {
-			timeout, cancel := context.WithTimeout(ctx, routerRecvOutTimeout)
+			timeout, cancel := context.WithTimeout(context.Background(), routerRecvOutTimeout)
 			select {
 			case ch <- msg:
 			case <-timeout.Done():
@@ -134,10 +135,14 @@ func (r *router) receiver(ctx context.Context) {
 	for _, ch := range r.receiverOut {
 		close(ch)
 	}
+	close(r.cmdOut)
+
+	logger.Info("terminated")
 }
 
-func (r *router) transmitter(ctx context.Context) {
+func (r *router) transmitter() {
 	logger := r.logger.WithField("phase", "transmitter")
+	logger.Info("started")
 	wg := sync.WaitGroup{}
 	wg.Add(len(r.transmitterIn))
 	outMsgCh := make(chan OutboundMessage, routerTranHandleLen)
@@ -168,7 +173,7 @@ func (r *router) transmitter(ctx context.Context) {
 			continue
 		}
 
-		timeout, cancel := context.WithTimeout(ctx, routerTranOutTimeout)
+		timeout, cancel := context.WithTimeout(context.Background(), routerTranOutTimeout)
 		select {
 		case ch <- msg:
 		case <-timeout.Done():
@@ -180,17 +185,22 @@ func (r *router) transmitter(ctx context.Context) {
 	for _, ch := range r.transmitterOut {
 		close(ch)
 	}
+	logger.Info("terminated")
 }
 
-func (r *router) start(ctx context.Context) {
+func (r *router) start() {
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
-		r.receiver(ctx)
+		r.cmd.start()
 		wg.Done()
 	}()
 	go func() {
-		r.transmitter(ctx)
+		r.receiver()
+		wg.Done()
+	}()
+	go func() {
+		r.transmitter()
 		wg.Done()
 	}()
 

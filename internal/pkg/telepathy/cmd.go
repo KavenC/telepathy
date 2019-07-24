@@ -64,29 +64,33 @@ func (m *cmdManager) isCmdMsg(text string) bool {
 	return strings.HasPrefix(text, cmdPrefix+" ")
 }
 
-func (m *cmdManager) worker(ctx context.Context, id int) {
+func (m *cmdManager) worker(id int) {
 	logger := m.logger.WithField("worker", strconv.Itoa(id))
 
 	// worker function for handling command messages
 	for msg := range m.cmdIn {
 		args := regexCmdSplitter.Split(msg.Text, -1)
-		timeout, cancel := context.WithTimeout(ctx, cmdTimeout)
+		timeout, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		done := make(chan interface{})
-		state := argo.State{}
+
 		go func() {
-			m.cmdRoot.Parse(&state, args, CmdExtraArgs{
+			state := argo.State{}
+			err := m.cmdRoot.Parse(&state, args, CmdExtraArgs{
 				Message: msg,
 				Ctx:     timeout,
 			})
-			close(done)
-		}()
-		select {
-		case <-done:
+			if err != nil {
+				logger.Errorf("command parsing failed: %s", err.Error())
+			}
 			if state.OutputStr.Len() != 0 {
 				msg := msg.Reply()
 				msg.Text = state.OutputStr.String()
 				m.msgOut <- msg
 			}
+			close(done)
+		}()
+		select {
+		case <-done:
 		case <-timeout.Done():
 			logger.Warnf("timeout/cacnelled: %s", args)
 		}
@@ -94,17 +98,18 @@ func (m *cmdManager) worker(ctx context.Context, id int) {
 	}
 }
 
-func (m *cmdManager) start(ctx context.Context) {
+func (m *cmdManager) start() {
+	m.cmdRoot.Finalize()
 	wg := sync.WaitGroup{}
 	wg.Add(cmdWorkerNum)
 	for id := 0; id < cmdWorkerNum; id++ {
 		go func(id int) {
-			m.worker(ctx, id)
+			m.worker(id)
 			wg.Done()
 		}(id)
 	}
 
-	m.logger.Info("started")
+	m.logger.Infof("started worker: %d", cmdWorkerNum)
 	wg.Wait()
 	close(m.msgOut)
 	m.logger.Info("termianted")

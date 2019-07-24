@@ -1,7 +1,6 @@
 package telepathy
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,11 +33,15 @@ func (c *channelService) SetLogger(logger *logrus.Entry) {
 	c.logger = logger
 }
 
-func (c *channelService) Start(context context.Context) {
+func (c *channelService) Start() {
 	return
 }
 
-func (c *channelService) CommandInterface() *argo.Action {
+func (c *channelService) Stop() {
+
+}
+
+func (c *channelService) Command() *argo.Action {
 	cmd := &argo.Action{
 		Trigger:    "channel",
 		ShortDescr: "Telepathy Channel Management",

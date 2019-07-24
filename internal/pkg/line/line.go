@@ -5,7 +5,6 @@
 package line
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -38,7 +37,6 @@ type Messenger struct {
 	Token         string
 	inMsgChannel  chan telepathy.InboundMessage
 	outMsgChannel <-chan telepathy.OutboundMessage
-	ctx           context.Context
 	bot           *linebot.Client
 	replyTokenMap sync.Map
 	logger        *logrus.Entry
@@ -54,27 +52,21 @@ func (m *Messenger) ID() string {
 }
 
 // Start starts the plugin
-func (m *Messenger) Start(ctx context.Context) {
+func (m *Messenger) Start() {
 	bot, err := linebot.New(m.Secret, m.Token)
 	if err != nil {
 		m.logger.Panic(err.Error())
 	}
 	m.bot = bot
-	m.ctx = ctx
 
-	done := make(chan interface{})
 	m.logger.Info("started")
-	go func() {
-		m.transmitter()
-		close(done)
-	}()
-
-	// Wait until context is cancelled
-	<-ctx.Done()
-	// triggers termination by closing receiver channel
-	close(m.inMsgChannel)
-	<-done
+	m.transmitter()
 	m.logger.Info("terminated")
+}
+
+// Stop terminates the plugin
+func (m *Messenger) Stop() {
+	close(m.inMsgChannel)
 }
 
 // SetLogger sets the logger
@@ -112,7 +104,7 @@ func (m *Messenger) transmitter() {
 		messages := []linebot.SendingMessage{}
 
 		if message.Text == "" && message.Image == nil {
-			return
+			continue
 		}
 
 		text := strings.Builder{}
@@ -153,7 +145,7 @@ func (m *Messenger) transmitter() {
 			_, err := call.Do()
 
 			if err == nil {
-				return
+				continue
 			}
 
 			// If send failed with replyToken, output err msg and retry with PushMessage
@@ -175,11 +167,6 @@ func (m *Messenger) transmitter() {
 }
 
 func (m *Messenger) webhookHandler(response http.ResponseWriter, request *http.Request) {
-	if m.ctx == nil {
-		m.logger.Warn("event dropped")
-		return
-	}
-
 	events, err := m.bot.ParseRequest(request)
 	if err != nil {
 		m.logger.Errorf("invalid request: %s", err.Error())

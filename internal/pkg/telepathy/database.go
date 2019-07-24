@@ -55,7 +55,7 @@ func (h *databaseHandler) attachRequester(id string, ch <-chan DatabaseRequest) 
 	h.requesterMap[id] = ch
 }
 
-func (h *databaseHandler) worker(ctx context.Context) {
+func (h *databaseHandler) worker() {
 	wg := sync.WaitGroup{}
 	wg.Add(len(h.requesterMap))
 	for _, reqCh := range h.requesterMap {
@@ -73,43 +73,40 @@ func (h *databaseHandler) worker(ctx context.Context) {
 	}()
 
 	for request := range h.reqQueue {
-		timeout, cancel := context.WithTimeout(ctx, dBTimeout)
+		timeout, cancel := context.WithTimeout(context.Background(), dBTimeout)
 		done := make(chan interface{})
 		go func() {
 			ret := request.Action(timeout, h.database)
 			request.Return <- ret
 			close(done)
 		}()
+
 		select {
 		case <-timeout.Done():
-			h.logger.Warnf("request cancelled due to timeout/termination")
+			h.logger.Warnf("request timeout")
 		case <-done:
 		}
 		cancel()
 	}
 }
 
-func (h *databaseHandler) start(ctx context.Context) {
-	timeCtx, cancel := context.WithTimeout(ctx, time.Minute)
+func (h *databaseHandler) start() {
+	timeCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	err := h.client.Connect(timeCtx)
 	cancel()
 	if err != nil {
 		h.logger.Errorf("failed to connect to MongoDB: %s", err.Error())
 		return
 	}
+
 	h.database = h.client.Database(h.dbName)
-	h.logger.Infof("connected to MongoDB. Database name: %s", h.dbName)
+	h.logger.Infof("started. Database name: %s", h.dbName)
 
-	h.worker(ctx)
+	h.worker()
 
-	// termination
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	err = h.client.Disconnect(timeoutCtx)
-	cancel()
+	err = h.client.Disconnect(context.Background())
 	if err != nil {
 		h.logger.Errorf("failed to disconnect: %s", err.Error())
-	} else {
-		h.logger.Info("disconnected")
 	}
 	h.logger.Info("terminated")
 	return

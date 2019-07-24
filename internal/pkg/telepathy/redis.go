@@ -52,7 +52,7 @@ func (r *redisHandle) attachRequester(id string, ch <-chan RedisRequest) {
 	r.requesterMap[id] = ch
 }
 
-func (r *redisHandle) worker(ctx context.Context) {
+func (r *redisHandle) worker() {
 	wg := sync.WaitGroup{}
 	wg.Add(len(r.requesterMap))
 	for _, reqCh := range r.requesterMap {
@@ -70,7 +70,7 @@ func (r *redisHandle) worker(ctx context.Context) {
 	}()
 
 	for request := range r.reqQueue {
-		timeout, cancel := context.WithTimeout(ctx, dBTimeout)
+		timeout, cancel := context.WithTimeout(context.Background(), dBTimeout)
 		done := make(chan interface{})
 		go func() {
 			ret := request.Action(r.client.WithContext(timeout))
@@ -79,14 +79,15 @@ func (r *redisHandle) worker(ctx context.Context) {
 		}()
 		select {
 		case <-timeout.Done():
-			r.logger.Warnf("request cancelled due to timeout/termination")
+			r.logger.Warnf("request timeout")
 		case <-done:
+			// success
 		}
 		cancel()
 	}
 }
 
-func (r *redisHandle) start(ctx context.Context) {
+func (r *redisHandle) start() {
 	if err := r.client.Ping().Err(); err != nil {
 		r.logger.Errorf("ping failed: %s", err.Error())
 		return
@@ -96,9 +97,7 @@ func (r *redisHandle) start(ctx context.Context) {
 		r.logger.Errorf("failed to flush all:: %s", err.Error())
 	}
 
-	r.logger.Info("conneted to Redis.")
-
-	r.worker(ctx)
-
+	r.logger.Info("started")
+	r.worker()
 	r.logger.Info("terminated")
 }

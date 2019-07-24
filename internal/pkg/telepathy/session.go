@@ -3,6 +3,7 @@ package telepathy
 import (
 	"context"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -16,6 +17,7 @@ type Session struct {
 	webServer httpServer
 	router    *router
 	plugins   map[string]Plugin
+	done      chan interface{}
 	logger    *logrus.Entry
 }
 
@@ -29,17 +31,20 @@ type SessionConfig struct {
 }
 
 // NewSession creates a new Telepathy session
-func NewSession(config SessionConfig, plugins map[string]Plugin) (*Session, error) {
+func NewSession(config SessionConfig, plugins []Plugin) (*Session, error) {
 	session := Session{
 		webServer: httpServer{},
-		plugins:   plugins,
+		plugins:   make(map[string]Plugin),
 		logger:    logrus.WithField("module", "session"),
 	}
 
-	session.plugins["telepathy.channel"] = &channelService{}
-
 	var err error
-	session.webServer.uRL, err = url.Parse(config.RootURL)
+	// initialize backend services
+	// Init webserver
+	if err != nil {
+		return nil, err
+	}
+	err = session.webServer.init(config.RootURL, config.Port)
 	if err != nil {
 		return nil, err
 	}
@@ -59,13 +64,17 @@ func NewSession(config SessionConfig, plugins map[string]Plugin) (*Session, erro
 	// Init Router
 	session.router = newRouter()
 
-	// Init httpServer
-	err = session.webServer.init(config.Port)
-	if err != nil {
-		return nil, err
+	// install plugins
+	for _, p := range plugins {
+		if _, ok := session.plugins[p.ID()]; ok {
+			session.logger.Panicf("duplicated plugin id: %s", p.ID())
+		}
+		session.plugins[p.ID()] = p
 	}
 
-	// Init plugins
+	// install internal plugins
+	session.plugins["telepathy.channel"] = &channelService{}
+
 	session.initPlugin()
 
 	return &session, nil
@@ -125,36 +134,72 @@ func (s *Session) initPlugin() {
 
 // Start starts a Telepathy session
 // The function always returns an error when the seesion is terminated
-func (s *Session) Start(ctx context.Context) {
-	logrus.Info("session starting")
-
+func (s *Session) Start() {
+	s.done = make(chan interface{})
 	// Start backend services
-	logrus.Info("starting backend services")
-	go s.redis.start(ctx)
-	go s.db.start(ctx)
+	s.logger.Info("starting backend services")
+	wgBackend := sync.WaitGroup{}
+	startBackend := func(f func()) {
+		wgBackend.Add(1)
+		f()
+		wgBackend.Done()
+	}
+	go startBackend(s.redis.start)
+	go startBackend(s.db.start)
 
 	// Start plugins
+	wgPlugin := sync.WaitGroup{}
+	startPlugin := func(f func()) {
+		wgPlugin.Add(1)
+		f()
+		wgPlugin.Done()
+	}
 	for _, plugin := range s.plugins {
-		go plugin.Start(ctx)
+		go startPlugin(plugin.Start)
 	}
 
-	//Start Webhook handling server
-	logrus.WithField("module", "session").Info("starting web server")
+	// Start router
+	go func() {
+		wgBackend.Add(1)
+		s.router.start()
+		wgBackend.Done()
+	}()
+
+	// Start Webhook handling server
+	s.logger.Info("starting web server")
 	s.webServer.finalize()
 	go s.webServer.ListenAndServe()
 
-	// Wait here until the session is Done
-	<-ctx.Done()
-	logrus.WithField("module", "session").Info("stopping")
+	// Wait here until we received termination signal
+	<-s.done
+	s.logger.Info("terminating")
 
+	// Termination process
 	// Shutdown Http server
 	timeout, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	err := s.webServer.Shutdown(timeout)
 	stop()
 	if err != nil {
-		logrus.Errorf("failed to shutdown httpserver: %s", err.Error())
-	} else {
-		logrus.Info("httpserver shutdown")
+		s.logger.Errorf("failed to shutdown httpserver: %s", err.Error())
+		return
 	}
-	logrus.Info("session closed")
+	s.logger.Info("httpserver shutdown")
+
+	// Terminate plugins
+	for _, plugin := range s.plugins {
+		plugin.Stop()
+	}
+	wgPlugin.Wait()
+	s.logger.Info("all plugins terminated")
+
+	// Wait for backend service
+	wgBackend.Wait()
+	s.logger.Info("all backend services terminated")
+
+	s.logger.Info("session closed")
+}
+
+// Stop triggers termination of telepathy session
+func (s *Session) Stop() {
+	close(s.done)
 }

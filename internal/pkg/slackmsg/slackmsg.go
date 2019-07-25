@@ -8,7 +8,6 @@ package slackmsg
 
 import (
 	"bytes"
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -17,6 +16,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -24,12 +24,13 @@ import (
 	"github.com/nlopes/slack"
 	"github.com/nlopes/slack/slackevents"
 	"github.com/sirupsen/logrus"
+	"gitlab.com/kavenc/telepathy/internal/pkg/imgur"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
 const (
-	// ID is a unique messenger identifier
-	ID = "SLACK"
+	inMsgLen = 10
+	dbReqLen = 1
 )
 
 var validSubType = map[string]bool{
@@ -37,127 +38,124 @@ var validSubType = map[string]bool{
 	"file_share": true,
 }
 
-type appInfo struct {
-	clientID      string
-	clientSecret  string
-	signingSecret []byte
+// Messenger defines the plugin structure
+type Messenger struct {
+	telepathy.Plugin
+	telepathy.PluginMessenger
+	telepathy.PluginWebhookHandler
+	telepathy.PluginDatabaseUser
+	SigningSecret []byte
+	ClientID      string
+	ClientSecret  string
+	botInfoMap    botInfoMap
+	inMsg         chan telepathy.InboundMessage
+	outMsg        <-chan telepathy.OutboundMessage
+	dbReq         chan telepathy.DatabaseRequest
+	logger        *logrus.Entry
 }
 
-type messenger struct {
-	telepathy.MessengerPlugin
-	session    *telepathy.Session
-	handler    telepathy.InboundMsgHandler
-	ctx        context.Context
-	botInfoMap botInfoMap
-	app        appInfo
-	logger     *logrus.Entry
+// ID implements telepathy.Plugin
+func (m *Messenger) ID() string {
+	return "SLACK"
 }
 
-// InitError indicates an error when initializing messenger plugin
-type InitError struct {
-	msg string
+// SetLogger implements telepathy.Plugin
+func (m *Messenger) SetLogger(logger *logrus.Entry) {
+	m.logger = logger
 }
 
-func init() {
-	telepathy.RegisterMessenger(ID, new)
-}
-
-func (e InitError) Error() string {
-	return "Slack init failed: " + e.msg
-}
-
-func (m *messenger) ID() string {
-	return ID
-}
-
-func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
-	msgr := messenger{
-		session: param.Session,
-		handler: param.MsgHandler,
-		logger:  param.Logger,
-	}
-
-	secret, ok := param.Config["SIGNING_SECRET"]
-	if !ok {
-		return nil, InitError{msg: "config: SIGNING_SECRET not found"}
-	}
-	secretString, ok := secret.(string)
-	if !ok {
-		return nil, InitError{msg: "invalid config: SIGNING_SECRET"}
-	}
-	msgr.app.signingSecret = []byte(secretString)
-
-	config, ok := param.Config["CLIENT_ID"]
-	if !ok {
-		return nil, InitError{msg: "config: CLIENT_ID not found"}
-	}
-	msgr.app.clientID, ok = config.(string)
-	if !ok {
-		return nil, InitError{msg: "invalid config: CLIENT_ID"}
-	}
-
-	config, ok = param.Config["CLIENT_SECRET"]
-	if !ok {
-		return nil, InitError{msg: "config: CLIENT_SECRET not found"}
-	}
-	msgr.app.clientSecret, ok = config.(string)
-	if !ok {
-		return nil, InitError{msg: "invalid config: CLIENT_SECRET"}
-	}
-
-	return &msgr, nil
-}
-
-func (m *messenger) Start(ctx context.Context) {
-	m.ctx = ctx
+// Start implements telepathy.Plugin
+func (m *Messenger) Start() {
 	m.botInfoMap = botInfoMap{}
 	if err := m.readBotInfoFromDB(); err != nil {
 		m.logger.Warnf("load bot info failed: %s", err.Error())
 	}
-
-	m.session.WebServer.RegisterWebhook("slack-callback", m.webhook)
-	m.session.WebServer.RegisterWebhook("slack-oauth", m.oauth)
+	m.logger.Info("started")
+	m.transmitter()
+	m.logger.Info("terminated")
 }
 
-func (m *messenger) Send(message *telepathy.OutboundMessage) {
-	channel, err := newUniqueChannel(message.TargetID)
-	if err != nil {
-		m.logger.WithField("phase", "send").Errorf("invalid target ID: %s (%s)", message.TargetID, err.Error())
-		return
-	}
+// Stop implements telepathy.Plugin
+func (m *Messenger) Stop() {
+	close(m.inMsg)
+}
 
-	info, ok := m.botInfoMap[channel.TeamID]
-	if !ok {
-		m.logger.WithField("phase", "send").Errorf("unauthorized team: %s", channel.TeamID)
-		return
+// InMsgChannel implements telepathy.PluginMessenger
+func (m *Messenger) InMsgChannel() <-chan telepathy.InboundMessage {
+	if m.inMsg == nil {
+		m.inMsg = make(chan telepathy.InboundMessage, inMsgLen)
 	}
+	return m.inMsg
+}
 
-	var options []slack.MsgOption
-	text := strings.Builder{}
-	text.WriteString(message.Text)
-	if message.Image != nil {
-		imgURL, err := message.Image.FullURL()
-		if err == nil {
-			if text.Len() > 0 {
-				fmt.Fprintf(&text, "\n%s", imgURL)
-			} else {
-				text.WriteString(imgURL)
-			}
-		} else {
-			m.logger.Warnf("image get FullURL failed: %s", err.Error())
+// AttachOutMsgChannel implements telepathy.PluginMessenger
+func (m *Messenger) AttachOutMsgChannel(ch <-chan telepathy.OutboundMessage) {
+	m.outMsg = ch
+}
+
+// Webhook implements telepathy.PluginWebhookHandler
+func (m *Messenger) Webhook() map[string]telepathy.HTTPHandler {
+	return map[string]telepathy.HTTPHandler{
+		"slack-callback": m.webhook,
+		"slack-oauth":    m.oauth,
+	}
+}
+
+// SetWebhookURL implements telepathy.PluginWebhookHandler
+func (m *Messenger) SetWebhookURL(map[string]*url.URL) {
+
+}
+
+// DBRequestChannel implements PluginDatabaseUser
+func (m *Messenger) DBRequestChannel() <-chan telepathy.DatabaseRequest {
+	if m.dbReq == nil {
+		m.dbReq = make(chan telepathy.DatabaseRequest, dbReqLen)
+	}
+	return m.dbReq
+}
+
+func (m *Messenger) transmitter() {
+	for message := range m.outMsg {
+		chID := message.ToChannel.ChannelID
+		channel, err := newUniqueChannel(chID)
+		if err != nil {
+			m.logger.WithField("phase", "send").Errorf("invalid target ID: %s (%s)", chID, err.Error())
+			continue
 		}
-	}
 
-	options = append(options, slack.MsgOptionText(text.String(), false))
-	if message.AsName != "" {
-		options = append(options, slack.MsgOptionUsername(message.AsName))
-	}
+		info, ok := m.botInfoMap[channel.TeamID]
+		if !ok {
+			m.logger.WithField("phase", "send").Errorf("unauthorized team: %s", channel.TeamID)
+			continue
+		}
 
-	bot := slack.New(info.AccessToken)
-	bot.PostMessage(channel.ChannelID, options...)
+		var options []slack.MsgOption
+		text := strings.Builder{}
+		text.WriteString(message.Text)
+		if message.Image != nil {
+			imgURL, err := message.Image.FullURL()
+			if err == nil {
+				if text.Len() > 0 {
+					fmt.Fprintf(&text, "\n%s", imgURL)
+				} else {
+					text.WriteString(imgURL)
+				}
+			} else {
+				m.logger.Warnf("image get FullURL failed: %s", err.Error())
+			}
+		}
+
+		options = append(options, slack.MsgOptionText(text.String(), false))
+		if message.AsName != "" {
+			options = append(options, slack.MsgOptionUsername(message.AsName))
+		}
+
+		bot := slack.New(info.AccessToken)
+		bot.PostMessage(channel.ChannelID, options...)
+	}
 }
 
-func (m *messenger) verifyRequest(header http.Header, body []byte) bool {
+func (m *Messenger) verifyRequest(header http.Header, body []byte) bool {
 	timestamp, ok := header["X-Slack-Request-Timestamp"]
 	if !ok || len(timestamp) > 1 {
 		return false
@@ -179,7 +177,7 @@ func (m *messenger) verifyRequest(header http.Header, body []byte) bool {
 	}
 
 	verifyString := fmt.Sprintf("v0:%s:%s", timestamp[0], body)
-	mac := hmac.New(sha256.New, m.app.signingSecret)
+	mac := hmac.New(sha256.New, m.SigningSecret)
 	mac.Write([]byte(verifyString))
 	expectedMac := fmt.Sprintf("v0=%s", hex.EncodeToString(mac.Sum(nil)))
 
@@ -191,14 +189,14 @@ func (m *messenger) verifyRequest(header http.Header, body []byte) bool {
 	return true
 }
 
-func (m *messenger) createImgContent(bot *slack.Client, file slackevents.File) *telepathy.ByteContent {
+func (m *Messenger) createImgContent(bot *slack.Client, file slackevents.File) *imgur.ByteContent {
 	imgBuffer := bytes.Buffer{}
 	err := bot.GetFile(file.URLPrivateDownload, &imgBuffer)
 	if err != nil {
 		m.logger.Error("download attached image failed: " + err.Error())
 		return nil
 	}
-	content := telepathy.ByteContent{
+	content := imgur.ByteContent{
 		Content: imgBuffer.Bytes(),
 	}
 	ext := file.Filetype
@@ -210,7 +208,7 @@ func (m *messenger) createImgContent(bot *slack.Client, file slackevents.File) *
 	return &content
 }
 
-func (m *messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
+func (m *Messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
 	info, ok := m.botInfoMap[teamID]
 	if !ok {
 		m.logger.Warnf("received from unknwon team: %s", teamID)
@@ -267,7 +265,7 @@ func (m *messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
 			if strings.HasPrefix(file.Mimetype, "image") {
 				content := m.createImgContent(bot, file)
 				if content != nil {
-					message.Image = telepathy.NewImage(*content)
+					message.Image = imgur.NewImage(*content)
 				}
 				// TODO: support multiple image sharing
 				break
@@ -275,10 +273,10 @@ func (m *messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
 		}
 	}
 
-	m.handler(m.ctx, message)
+	m.inMsg <- message
 }
 
-func (m *messenger) webhook(response http.ResponseWriter, request *http.Request) {
+func (m *Messenger) webhook(response http.ResponseWriter, request *http.Request) {
 	body, err := ioutil.ReadAll(request.Body)
 	if err != nil {
 		m.logger.Errorf("unable to read request body: %s", err.Error())
@@ -324,7 +322,7 @@ func (m *messenger) webhook(response http.ResponseWriter, request *http.Request)
 	}
 }
 
-func (m *messenger) oauth(response http.ResponseWriter, request *http.Request) {
+func (m *Messenger) oauth(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
 		response.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -336,7 +334,7 @@ func (m *messenger) oauth(response http.ResponseWriter, request *http.Request) {
 	case "new":
 		code := request.URL.Query().Get("code")
 		if code != "" {
-			oauthResp, err := slack.GetOAuthResponse(&http.Client{}, m.app.clientID, m.app.clientSecret, code, "")
+			oauthResp, err := slack.GetOAuthResponse(&http.Client{}, m.ClientID, m.ClientSecret, code, "")
 			if err != nil {
 				msg := fmt.Sprintf("oauth failed: %s", err.Error())
 				logger.Errorf(msg)

@@ -8,6 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/discord"
 	"gitlab.com/kavenc/telepathy/internal/pkg/line"
+	"gitlab.com/kavenc/telepathy/internal/pkg/slackmsg"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
@@ -29,6 +30,11 @@ func main() {
 		},
 		&discord.Messenger{
 			Token: os.Getenv("DISCORD_BOT_TOKEN"),
+		},
+		&slackmsg.Messenger{
+			ClientID:      os.Getenv("SLACK_CLIENT_ID"),
+			ClientSecret:  os.Getenv("SLACK_CLIENT_SECRET"),
+			SigningSecret: []byte(os.Getenv("SLACK_SIGNING_SECRET")),
 		},
 	}
 

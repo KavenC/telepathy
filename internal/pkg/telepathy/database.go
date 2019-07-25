@@ -44,7 +44,7 @@ func newDatabaseHandler(mongourl string, dbname string) (*databaseHandler, error
 	handler.reqQueue = make(chan DatabaseRequest, dBReqLen)
 	handler.logger = logger
 	handler.requesterMap = make(map[string]<-chan DatabaseRequest)
-	logger.Info("created database handler: Mongo")
+
 	return &handler, nil
 }
 

@@ -38,6 +38,8 @@ func NewSession(config SessionConfig, plugins []Plugin) (*Session, error) {
 		logger:    logrus.WithField("module", "session"),
 	}
 
+	session.logger.Info("initializing")
+
 	var err error
 	// initialize backend services
 	// Init webserver

@@ -41,7 +41,6 @@ func newRedisHandle(redisurl string) (*redisHandle, error) {
 	handle.reqQueue = make(chan RedisRequest, redisReqLen)
 	handle.logger = logger
 
-	logger.Info("created redis handler")
 	return &handle, nil
 }
 

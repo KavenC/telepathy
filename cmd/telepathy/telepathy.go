@@ -6,6 +6,7 @@ import (
 	"syscall"
 
 	"github.com/sirupsen/logrus"
+	"gitlab.com/kavenc/telepathy/internal/pkg/discord"
 	"gitlab.com/kavenc/telepathy/internal/pkg/line"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
@@ -25,6 +26,9 @@ func main() {
 		&line.Messenger{
 			Secret: os.Getenv("LINE_CHANNEL_SECRET"),
 			Token:  os.Getenv("LINE_CHANNEL_TOKEN"),
+		},
+		&discord.Messenger{
+			Token: os.Getenv("DISCORD_BOT_TOKEN"),
 		},
 	}
 

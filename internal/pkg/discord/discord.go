@@ -6,126 +6,123 @@ package discord
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net/http"
 	"path"
 	"strings"
+
+	"gitlab.com/kavenc/telepathy/internal/pkg/imgur"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
-// ID is a unique string to identify this Messenger handler
-const ID = "DISCORD"
+const (
+	inMsgLen = 10
+)
 
+// Messenger is the main discord plugin structure
 type Messenger struct {
 	telepathy.Plugin
 	telepathy.PluginMessenger
-
-	bot    *discordgo.Session
-	logger *logrus.Entry
+	Token         string
+	stopListening func()
+	bot           *discordgo.Session
+	inMsg         chan telepathy.InboundMessage
+	outMsg        <-chan telepathy.OutboundMessage
+	logger        *logrus.Entry
 }
 
-func (m *Messenger) ID() string{
+// ID implements telepathy.Plugin interface
+func (m *Messenger) ID() string {
 	return "DISCORD"
 }
 
+// SetLogger implements telepathy.Plugin interface
 func (m *Messenger) SetLogger(logger *logrus.Entry) {
 	m.logger = logger
 }
 
-func (m *Messenger)
-
-func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
-	msgr := messenger{
-		session: param.Session,
-		handler: param.MsgHandler,
-		logger:  param.Logger,
-	}
-
+// Start implements telepathy.Plugin interface
+func (m *Messenger) Start() {
 	var err error
-	config, ok := param.Config["BOT_TOKEN"]
-	if !ok {
-		return nil, InitError{msg: "config: BOT_TOKEN not found"}
-	}
-
-	token, ok := config.(string)
-	if !ok {
-		return nil, InitError{msg: "invalid config: BOT_TOKEN"}
-	}
-
-	msgr.bot, err = discordgo.New("Bot " + token)
+	m.bot, err = discordgo.New("Bot " + m.Token)
 	if err != nil {
-		return nil, InitError{msg: err.Error()}
+		m.logger.Errorf("start failed: %s", err.Error())
+		return
 	}
 
-	msgr.bot.AddHandler(msgr.msgHandler)
-	return &msgr, nil
-}
-
-func (m *messenger) ID() string {
-	return ID
-}
-
-func (m *messenger) Start(ctx context.Context) {
-	// Open a websocket connection to Discord and begin listening.
-	err := m.bot.Open()
+	m.stopListening = m.bot.AddHandler(m.msgHandler)
+	err = m.bot.Open()
 	if err != nil {
 		m.logger.Errorf("open websocket connection failed: %s", err.Error())
 		return
 	}
 
-	m.ctx = ctx
+	m.logger.Info("started")
+	m.transmitter()
+	err = m.bot.Close()
+	if err != nil {
+		m.logger.Errorf("termination failed: %s", err.Error())
+	}
+	m.logger.Info("terminated")
+}
 
-	// Run until being cancelled
-	go func() {
-		<-ctx.Done()
+// Stop implements telepathy.Plugin interface
+func (m *Messenger) Stop() {
+	m.stopListening()
+	close(m.inMsg)
+}
 
-		m.logger.Info("terminating")
-		// Cleanly close down the Discord session.
-		err = m.bot.Close()
+// InMsgChannel implements telepathy.PluginMessenger
+func (m *Messenger) InMsgChannel() <-chan telepathy.InboundMessage {
+	if m.inMsg == nil {
+		m.inMsg = make(chan telepathy.InboundMessage, inMsgLen)
+	}
+	return m.inMsg
+}
+
+// AttachOutMsgChannel impelements telepathy.PluginMessenger
+func (m *Messenger) AttachOutMsgChannel(ch <-chan telepathy.OutboundMessage) {
+	m.outMsg = ch
+}
+
+func (m *Messenger) transmitter() {
+	var err error
+	for message := range m.outMsg {
+		text := strings.Builder{}
+		if message.AsName != "" {
+			fmt.Fprintf(&text, "**[ %s ]**\n%s", message.AsName, message.Text)
+		} else {
+			text.WriteString(message.Text)
+		}
+
+		if message.Image != nil {
+			_, err = m.bot.ChannelMessageSendComplex(
+				message.ToChannel.ChannelID,
+				&discordgo.MessageSend{
+					Content: text.String(),
+					File: &discordgo.File{
+						Name:        "sent-from-telepathy.png", // always use png, just to make discord show the image
+						ContentType: message.Image.Type,
+						Reader:      bytes.NewReader(message.Image.Content),
+					},
+				},
+			)
+		} else {
+			if len(message.Text) > 0 {
+				_, err = m.bot.ChannelMessageSend(message.ToChannel.ChannelID, text.String())
+			}
+		}
 
 		if err != nil {
-			m.logger.Errorf("error when closing: %s", err.Error())
+			m.logger.Error("msg send failed: " + err.Error())
 		}
-	}()
-}
-
-func (m *messenger) Send(message *telepathy.OutboundMessage) {
-	var err error
-	text := strings.Builder{}
-	if message.AsName != "" {
-		fmt.Fprintf(&text, "**[ %s ]**\n%s", message.AsName, message.Text)
-	} else {
-		text.WriteString(message.Text)
-	}
-
-	if message.Image != nil {
-		_, err = m.bot.ChannelMessageSendComplex(
-			message.TargetID,
-			&discordgo.MessageSend{
-				Content: text.String(),
-				File: &discordgo.File{
-					Name:        "sent-from-telepathy.png", // always use png, just to make discord show the image
-					ContentType: message.Image.Type,
-					Reader:      bytes.NewReader(message.Image.Content),
-				},
-			},
-		)
-	} else {
-		if len(message.Text) > 0 {
-			_, err = m.bot.ChannelMessageSend(message.TargetID, text.String())
-		}
-	}
-
-	if err != nil {
-		m.logger.Error("msg send failed: " + err.Error())
 	}
 }
 
-func createImgContent(att *discordgo.MessageAttachment, logger *logrus.Entry) *telepathy.ByteContent {
+func createImgContent(att *discordgo.MessageAttachment, logger *logrus.Entry) *imgur.ByteContent {
 	dl, err := http.Get(att.ProxyURL)
 	if err != nil {
 		logger.Error("download attached image failed: " + err.Error())
@@ -134,7 +131,7 @@ func createImgContent(att *discordgo.MessageAttachment, logger *logrus.Entry) *t
 	defer dl.Body.Close()
 	buf := bytes.NewBuffer([]byte{})
 	buf.ReadFrom(dl.Body)
-	content := telepathy.ByteContent{
+	content := imgur.ByteContent{
 		Content: buf.Bytes(),
 	}
 	ext := strings.ToLower(path.Ext(att.Filename))
@@ -146,7 +143,7 @@ func createImgContent(att *discordgo.MessageAttachment, logger *logrus.Entry) *t
 	return &content
 }
 
-func (m *messenger) msgHandler(_ *discordgo.Session, dgmessage *discordgo.MessageCreate) {
+func (m *Messenger) msgHandler(_ *discordgo.Session, dgmessage *discordgo.MessageCreate) {
 	// Ignore all messages created by the bot itself
 	if dgmessage.Author.ID == m.bot.State.User.ID {
 		return
@@ -169,7 +166,7 @@ func (m *messenger) msgHandler(_ *discordgo.Session, dgmessage *discordgo.Messag
 		if att := dgmessage.Attachments[0]; att.Height > 0 && att.Width > 0 {
 			content := createImgContent(att, m.logger)
 			if content != nil {
-				message.Image = telepathy.NewImage(*content)
+				message.Image = imgur.NewImage(*content)
 			}
 		}
 	}
@@ -180,5 +177,5 @@ func (m *messenger) msgHandler(_ *discordgo.Session, dgmessage *discordgo.Messag
 	}
 	message.IsDirectMessage = channel.Type == discordgo.ChannelTypeDM
 
-	m.handler(m.ctx, message)
+	m.inMsg <- message
 }

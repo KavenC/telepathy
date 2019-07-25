@@ -78,6 +78,8 @@ func (m *Messenger) Start() {
 // Stop implements telepathy.Plugin
 func (m *Messenger) Stop() {
 	close(m.inMsg)
+	<-m.writeBotInfoToDB()
+	close(m.dbReq)
 }
 
 // InMsgChannel implements telepathy.PluginMessenger

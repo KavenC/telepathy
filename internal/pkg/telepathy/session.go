@@ -87,6 +87,7 @@ func (s *Session) initPlugin() {
 	// fuse them with framework modules
 	logger := s.logger.WithField("phase", "init-plugin")
 	for id, p := range s.plugins {
+		logger.Infof("init plugin: %s", id)
 		// See plugin.go for interface definitions
 		// first, we check if the id matches
 		if id != p.ID() {

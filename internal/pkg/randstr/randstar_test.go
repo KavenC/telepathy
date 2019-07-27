@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestRandStr(t *testing.T) {
+func TestGenerate(t *testing.T) {
 	for round := 100; round > 0; round-- {
-		out := RandStr(5)
+		out := Generate(5)
 		if len(out) != 5 {
 			t.Logf("Result length error")
 			t.Fail()

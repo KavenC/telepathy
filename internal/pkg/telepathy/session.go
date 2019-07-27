@@ -102,7 +102,7 @@ func (s *Session) initPlugin() {
 		}
 
 		if pcmd, ok := p.(PluginCommandHandler); ok {
-			s.router.cmd.attachCommandInterface(pcmd.Command())
+			s.router.cmd.attachCommandInterface(pcmd.Command(s.router.cmd.done))
 		}
 
 		if pwebh, ok := p.(PluginWebhookHandler); ok {

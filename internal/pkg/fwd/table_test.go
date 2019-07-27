@@ -2,34 +2,31 @@ package fwd
 
 import (
 	"bytes"
-	"context"
 	"reflect"
 	"sync"
 	"testing"
 
 	"github.com/mongodb/mongo-go-driver/bson"
 
-	"github.com/sirupsen/logrus"
-
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
-func getTestTable() (*table, func()) {
-	tab := table{logger: logrus.WithField("module", "table_test")}
-	ctx, cancel := context.WithCancel(context.Background())
-	tab.start(ctx)
-	return &tab, cancel
+func getTestTable() *table {
+	tab := newTable()
+	go tab.start()
+	return tab
 }
 
 func TestTableInsert(t *testing.T) {
-	tab, cancel := getTestTable()
-	defer cancel()
+	tab := getTestTable()
+	defer tab.stop()
 	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
 	to := TableEntry{
 		telepathy.Channel{MessengerID: "msgA", ChannelID: "chB"},
 		Alias{SrcAlias: "src", DstAlias: "dst"},
 	}
 	ret := <-tab.insert(from, to)
+
 	if !ret.ok {
 		t.Error("insert failed")
 	}
@@ -39,8 +36,8 @@ func TestTableInsert(t *testing.T) {
 }
 
 func TestTableInsertDuplicate(t *testing.T) {
-	tab, cancel := getTestTable()
-	defer cancel()
+	tab := getTestTable()
+	defer tab.stop()
 	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
 	to := TableEntry{
 		telepathy.Channel{MessengerID: "msgA", ChannelID: "chB"},
@@ -57,8 +54,8 @@ func TestTableInsertDuplicate(t *testing.T) {
 }
 
 func TestTableDelete(t *testing.T) {
-	tab, cancel := getTestTable()
-	defer cancel()
+	tab := getTestTable()
+	defer tab.stop()
 	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
 	to := TableEntry{
 		telepathy.Channel{MessengerID: "msgA", ChannelID: "chB"},
@@ -73,8 +70,8 @@ func TestTableDelete(t *testing.T) {
 }
 
 func TestTableDeleteNonExistsTo(t *testing.T) {
-	tab, cancel := getTestTable()
-	defer cancel()
+	tab := getTestTable()
+	defer tab.stop()
 	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
 	to := TableEntry{
 		telepathy.Channel{MessengerID: "msgA", ChannelID: "chB"},
@@ -90,8 +87,8 @@ func TestTableDeleteNonExistsTo(t *testing.T) {
 }
 
 func TestTableDeleteNonExistsFrom(t *testing.T) {
-	tab, cancel := getTestTable()
-	defer cancel()
+	tab := getTestTable()
+	defer tab.stop()
 	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
 	to := TableEntry{
 		telepathy.Channel{MessengerID: "msgA", ChannelID: "chB"},
@@ -107,8 +104,8 @@ func TestTableDeleteNonExistsFrom(t *testing.T) {
 }
 
 func TestTableGetTo(t *testing.T) {
-	tab, cancel := getTestTable()
-	defer cancel()
+	tab := getTestTable()
+	defer tab.stop()
 	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
 	to := TableEntry{
 		telepathy.Channel{MessengerID: "msgA", ChannelID: "chB"},
@@ -141,8 +138,8 @@ func TestTableGetTo(t *testing.T) {
 }
 
 func TestTableInsertDuplicateAliasDstRename(t *testing.T) {
-	tab, cancel := getTestTable()
-	defer cancel()
+	tab := getTestTable()
+	defer tab.stop()
 	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
 	to := TableEntry{
 		telepathy.Channel{MessengerID: "msgA", ChannelID: "chB"},
@@ -168,8 +165,8 @@ func TestTableInsertDuplicateAliasDstRename(t *testing.T) {
 }
 
 func TestTableInsertDuplicateAliasSrc(t *testing.T) {
-	tab, cancel := getTestTable()
-	defer cancel()
+	tab := getTestTable()
+	defer tab.stop()
 	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
 	to := TableEntry{
 		telepathy.Channel{MessengerID: "msgA", ChannelID: "chB"},
@@ -195,8 +192,8 @@ func TestTableInsertDuplicateAliasSrc(t *testing.T) {
 }
 
 func TestTableInsertDuplicateAliasSrcRename(t *testing.T) {
-	tab, cancel := getTestTable()
-	defer cancel()
+	tab := getTestTable()
+	defer tab.stop()
 	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
 	from2 := telepathy.Channel{MessengerID: "msgB", ChannelID: "chA"}
 	to := TableEntry{
@@ -240,8 +237,8 @@ func mapContains(left, right *sync.Map) bool {
 }
 
 func TestTableBSON(t *testing.T) {
-	tab, cancel := getTestTable()
-	defer cancel()
+	tab := getTestTable()
+	defer tab.stop()
 	from := telepathy.Channel{MessengerID: "msgA", ChannelID: "chA"}
 	to := TableEntry{
 		telepathy.Channel{MessengerID: "msgA", ChannelID: "chB"},
@@ -273,16 +270,14 @@ func TestTableBSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	newTab := table{logger: logrus.WithField("module", "table_new")}
+	newTab := newTable()
 	bsValue := bsRaw.Lookup("table")
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
 	newTab.loadBSON(bsValue)
 
-	newCtx, newCancel := context.WithCancel(context.Background())
-	defer newCancel()
-	newTab.start(newCtx)
+	go newTab.start()
 	loadedTo := newTab.getTo(from)
 
 	if len(loadedTo) != 1 {
@@ -296,4 +291,5 @@ func TestTableBSON(t *testing.T) {
 	if !mapContains(&newTab.data, &tab.data) || !mapContains(&tab.data, &newTab.data) {
 		t.Errorf("table contents are not matched")
 	}
+	newTab.stop()
 }

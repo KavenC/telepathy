@@ -39,6 +39,7 @@ type cmdManager struct {
 	cmdRoot argo.Action
 	cmdIn   <-chan InboundMessage
 	msgOut  chan OutboundMessage
+	done    chan interface{}
 	logger  *logrus.Entry
 }
 
@@ -51,6 +52,7 @@ func newCmdManager(inCh <-chan InboundMessage) *cmdManager {
 		},
 		cmdIn:  inCh,
 		msgOut: make(chan OutboundMessage, cmdMsgOutLen),
+		done:   make(chan interface{}),
 		logger: logrus.WithField("module", "cmdManager"),
 	}
 }
@@ -111,6 +113,21 @@ func (m *cmdManager) start() {
 
 	m.logger.Infof("started worker: %d", cmdWorkerNum)
 	wg.Wait()
+	close(m.done)
 	close(m.msgOut)
 	m.logger.Info("termianted")
+}
+
+// CommandEnsureDM checks if command is from direct message
+func CommandEnsureDM(state *argo.State, extraArgs CmdExtraArgs) bool {
+	if !extraArgs.Message.IsDirectMessage {
+		state.OutputStr.WriteString("This command can only be run with Direct Messages (Whispers).\n")
+		return false
+	}
+	return true
+}
+
+// CommandPrefix returns command triggering keyword
+func CommandPrefix() string {
+	return cmdPrefix
 }

@@ -39,6 +39,7 @@ func newRedisHandle(redisurl string) (*redisHandle, error) {
 
 	handle.client = redis.NewClient(options)
 	handle.reqQueue = make(chan RedisRequest, redisReqLen)
+	handle.requesterMap = make(map[string]<-chan RedisRequest)
 	handle.logger = logger
 
 	return &handle, nil

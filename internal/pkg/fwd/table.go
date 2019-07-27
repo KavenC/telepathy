@@ -1,12 +1,12 @@
 package fwd
 
 import (
-	"context"
 	"errors"
 	"sync"
 
+	"gitlab.com/kavenc/telepathy/internal/pkg/randstr"
+
 	"github.com/mongodb/mongo-go-driver/bson"
-	"github.com/sirupsen/logrus"
 
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
@@ -46,7 +46,6 @@ type tableOp struct {
 type table struct {
 	data    sync.Map
 	opQueue chan tableOp
-	logger  *logrus.Entry
 }
 
 type insertRet struct {
@@ -54,28 +53,26 @@ type insertRet struct {
 	Alias
 }
 
-func (ft *table) start(ctx context.Context) {
-	if ft.opQueue == nil {
-		ft.opQueue = make(chan tableOp, queueLen)
+func newTable() *table {
+	return &table{
+		opQueue: make(chan tableOp, queueLen),
 	}
+}
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				ft.logger.Info("terminated")
-				return
-			case op := <-ft.opQueue:
-				if op.action == tableInsert {
-					op.ret <- ft.insertImpl(op)
-				} else if op.action == tableDelete {
-					op.ret <- ft.deleteImpl(op)
-				} else if op.action == tableBSON {
-					op.ret <- ft.bsonImpl()
-				}
-			}
+func (ft *table) start() {
+	for op := range ft.opQueue {
+		if op.action == tableInsert {
+			op.ret <- ft.insertImpl(op)
+		} else if op.action == tableDelete {
+			op.ret <- ft.deleteImpl(op)
+		} else if op.action == tableBSON {
+			op.ret <- ft.bsonImpl()
 		}
-	}()
+	}
+}
+
+func (ft *table) stop() {
+	close(ft.opQueue)
 }
 
 func (ft *table) insert(from telepathy.Channel, to TableEntry) chan insertRet {
@@ -172,7 +169,7 @@ func (ft *table) insertImpl(op tableOp) insertRet {
 		pass = true
 		for _, to := range toList {
 			if to.DstAlias == op.entry.DstAlias {
-				op.entry.DstAlias += "_" + telepathy.RandStr(4)
+				op.entry.DstAlias += "_" + randstr.Generate(4)
 				pass = false
 				break
 			}
@@ -193,7 +190,7 @@ func (ft *table) insertImpl(op tableOp) insertRet {
 		pass = true
 		for _, from := range fromList {
 			if from.SrcAlias == op.entry.SrcAlias {
-				op.entry.SrcAlias += "_" + telepathy.RandStr(4)
+				op.entry.SrcAlias += "_" + randstr.Generate(4)
 				pass = false
 				break
 			}

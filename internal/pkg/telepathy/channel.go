@@ -41,7 +41,7 @@ func (c *channelService) Stop() {
 
 }
 
-func (c *channelService) Command() *argo.Action {
+func (c *channelService) Command(_ <-chan interface{}) *argo.Action {
 	cmd := &argo.Action{
 		Trigger:    "channel",
 		ShortDescr: "Telepathy Channel Management",

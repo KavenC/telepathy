@@ -38,8 +38,10 @@ type PluginMessenger interface {
 }
 
 // PluginCommandHandler defines the necessary functions if a plugin implements command intefaces
+// The input parameter channel will be closed once the command parser is terminated
+// and no more command will be triggered
 type PluginCommandHandler interface {
-	Command() *argo.Action
+	Command(<-chan interface{}) *argo.Action
 }
 
 // PluginWebhookHandler defines the necessary functions if a plugin is handling webhook

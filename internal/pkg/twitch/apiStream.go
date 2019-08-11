@@ -5,31 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
-	"reflect"
-	"sync"
+	"io/ioutil"
 	"time"
-
-	"github.com/mongodb/mongo-go-driver/mongo"
-	"github.com/peterhellberg/link"
-	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
 // A Stream represents a twtich stream
 type Stream struct {
-	CommunityID  []string `json:"community_ids"`
-	GameID       string   `json:"game_id"`
-	ID           string   `json:"id"`
-	Language     string   `json:"language"`
-	StartedAt    string   `json:"started_at"`
-	ThumbnailURL string   `json:"thumbnail_url"`
-	Title        string   `json:"title"`
-	Type         string   `json:"type"`
-	UserID       string   `json:"user_id"`
-	UserName     string   `json:"user_name"`
-	ViewerCount  int      `json:"viewer_count"`
-	Online       bool     // Flag for online
+	CommunityID  []string  `json:"community_ids"`
+	GameID       string    `json:"game_id"`
+	ID           string    `json:"id"`
+	Language     string    `json:"language"`
+	StartedAt    time.Time `json:"started_at"`
+	ThumbnailURL string    `json:"thumbnail_url"`
+	Title        string    `json:"title"`
+	Type         string    `json:"type"`
+	UserID       string    `json:"user_id"`
+	UserName     string    `json:"user_name"`
+	ViewerCount  int       `json:"viewer_count"`
+	offline      bool
 }
 
 // A StreamList can be directly unmarshalled from twtich API respond JSON
@@ -37,67 +30,75 @@ type StreamList struct {
 	Data []Stream `json:"data"`
 }
 
-var subStreamLock sync.Mutex
+type streamQuery struct {
+	userID    []string
+	userLogin []string
+}
 
-func (t *twitchAPI) fetchStream(ctx context.Context, login string,
-	respChan chan<- Stream, errChan chan<- error) {
+func (t *twitchAPI) printStream(ctx context.Context, stream Stream, userLogin string) string {
+	game := <-t.gameByID(ctx, stream.GameID)
+	var gameName string
+	if game == nil {
+		gameName = stream.GameID
+	} else {
+		gameName = game.Name
+	}
+	return fmt.Sprintf(`- Title: %s
+- Streamer: %s (%s)
+- Game: %s
+- Viewer Count: %d
+- Link: %s`, stream.Title, stream.UserName, userLogin,
+		gameName, stream.ViewerCount, twitchURL+userLogin)
+}
+
+func (t *twitchAPI) getStreams(ctx context.Context, sq streamQuery) (*StreamList, error) {
+	// twitch api limits maximum query count at 100
+	if len(sq.userID)+len(sq.userLogin) > 100 {
+		return nil, errors.New("id + login query count exceeds limitation")
+	}
 
 	req, err := t.newRequest("GET", "streams", nil)
 	if err != nil {
-		errChan <- fmt.Errorf("new request failed: %s", err.Error())
-		return
+		return nil, err
 	}
+
+	req = req.WithContext(ctx)
 
 	query := req.URL.Query()
-	query.Add("user_login", login)
+	for _, login := range sq.userLogin {
+		query.Add("user_login", login)
+	}
+	for _, id := range sq.userID {
+		query.Add("user_id", id)
+	}
 	req.URL.RawQuery = query.Encode()
 
-	// Create go routine for http request
-	getRespChan := make(chan *http.Response)
-	getErrChan := make(chan error)
-	getCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	go t.sendReq(getCtx, req, getRespChan, getErrChan)
-
-	var resp *http.Response
-	select {
-	case resp = <-getRespChan:
-		defer resp.Body.Close()
-		break
-	case err := <-getErrChan:
-		errChan <- err
-		return
-	case <-ctx.Done():
-		t.logger.Warn("fetchStream() timed-out / cancelled")
-		errChan <- errors.New("timeout / cancelled")
-		return
-	}
-
-	// Handle response
-	if resp.StatusCode != 200 {
-		errChan <- fmt.Errorf("fetchStream() resp status: %d (ReqURL: %s)", resp.StatusCode,
-			req.URL.String())
-		return
-	}
-
-	decoder := json.NewDecoder(resp.Body)
-	var streamList StreamList
-	err = decoder.Decode(&streamList)
+	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		errChan <- fmt.Errorf("Resp.Body Read failed: %s", err.Error())
-		return
+		return nil, err
 	}
 
-	if len(streamList.Data) == 0 {
-		// Stream offline
-		respChan <- Stream{}
-		return
+	respBody, err := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, err
 	}
 
-	streamList.Data[0].Online = true
-	respChan <- streamList.Data[0]
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("http status code: %d - %s", resp.StatusCode, string(respBody))
+	}
+
+	streams := &StreamList{}
+	err = json.Unmarshal(respBody, streams)
+	if err != nil {
+		return nil, err
+	}
+
+	return streams, nil
 }
 
+/*
+var subStreamLock sync.Mutex
 func (s *twitchService) streamChangeWriteToDB() chan interface{} {
 	retCh := make(chan interface{}, 1)
 	s.session.DB.PushRequest(&telepathy.DatabaseRequest{
@@ -304,3 +305,4 @@ func (s *twitchService) streamChanged(ctx context.Context, request *http.Request
 		messenger.Send(&outMsg)
 	}
 }
+*/

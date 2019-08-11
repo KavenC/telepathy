@@ -4,10 +4,6 @@
 package twitch
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"net/http"
 	"net/url"
 	"sync"
 
@@ -16,69 +12,92 @@ import (
 )
 
 // ID is the plugin id
-const ID = "twitch"
+const id = "twitch"
 
 const twitchURL = "https://www.twitch.tv/"
 
-type twitchService struct {
-	telepathy.ServicePlugin
-	session    *telepathy.Session
+// Service defines telepathy plugin
+type Service struct {
+	telepathy.Plugin
+	telepathy.PluginCommandHandler
+	telepathy.PluginWebhookHandler
+	telepathy.PluginMsgProducer
+	telepathy.PluginDatabaseUser
+
+	cmdDone <-chan interface{}
+	msgOut  chan telepathy.OutboundMessage
+	dbReq   chan telepathy.DatabaseRequest
+
 	api        *twitchAPI
 	webhookURL *url.URL
-	// webhookSubs: Webhook type -> UserID -> Subsriber channel
-	webhookSubs  map[string]*telepathy.ChannelListMap
+
+	// webhookSubs: Webhook type -> UserID -> Subscriber channel
+	webhookSubs  map[string]*table
 	streamStatus sync.Map // UserID -> stream status
 
-	ctx    context.Context
+	// The client ID of twitch API
+	ClientID string
+	// HMAC secret for validating incoming notifications
+	WebsubSecret string
+
 	logger *logrus.Entry
 }
 
-func init() {
-	telepathy.RegisterService(ID, ctor)
+// ID implements telepathy.Plugin interface
+func (s *Service) ID() string {
+	return "TWITCH"
 }
 
-func newTwitchAPI() *twitchAPI {
-	api := &twitchAPI{httpTransport: &http.Transport{}}
-	api.httpClient = &http.Client{Transport: api.httpTransport}
-	return api
+// SetLogger implements telepathy.Plugin interface
+func (s *Service) SetLogger(logger *logrus.Entry) {
+	s.logger = logger
 }
 
-func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
-	// Construct service
-	service := &twitchService{
-		session:     param.Session,
-		api:         newTwitchAPI(),
-		logger:      param.Logger,
-		webhookSubs: make(map[string]*telepathy.ChannelListMap),
-	}
-	service.api.logger = service.logger.WithField("phase", "api")
-	service.webhookSubs[whTopicStream] = telepathy.NewChannelListMap()
+// Start implements telepathy.Plugin interface
+func (s *Service) Start() {
+	// Initialize
+	s.api = newTwitchAPI()
+	s.api.clientID = s.ClientID
+	s.api.websubSecret = s.WebsubSecret
+	s.api.webhookURL = s.webhookURL
+	s.api.logger = s.logger.WithField("module", "api")
 
-	clientID, ok := param.Config["CLIENT_ID"]
-	if !ok {
-		return nil, errors.New("CLIENT_ID is not set")
-	}
+	s.webhookSubs = make(map[string]*table)
 
-	service.api.clientID, ok = clientID.(string)
-	if !ok {
-		return nil, fmt.Errorf("Invalid CLIENT_ID type: %T", clientID)
-	}
+	// - Supported Webhooks
+	s.webhookSubs["streams"] = newTable()
 
-	// Register Webhook
-	var err error
-	service.webhookURL, err = service.session.WebServer.RegisterWebhook("twitch", service.webhook)
-	if err != nil {
-		return nil, err
-	}
+	// - Load Table content from database
 
-	return service, nil
+	s.logger.Info("started")
+	// Wait for close
+	<-s.cmdDone
+	// Cancel all websub renewal routines
+	s.api.renewCancelAll()
+	close(s.msgOut)
+	// TODO: write back db
+	close(s.dbReq)
+
+	s.logger.Info("terminated")
 }
 
-func (s *twitchService) Start(ctx context.Context) {
-	s.ctx = ctx
-	s.streamChangeLoadFromDB()
+// Stop implements telepathy.Plugin interface
+func (s *Service) Stop() {
+
 }
 
-func (s *twitchService) ID() string {
-	return ID
+// OutMsgChannel implements telepathy.PluginMsgProducer
+func (s *Service) OutMsgChannel() <-chan telepathy.OutboundMessage {
+	if s.msgOut == nil {
+		s.msgOut = make(chan telepathy.OutboundMessage, 10)
+	}
+	return s.msgOut
+}
+
+// DBRequestChannel implements telepathy.PluginDatabaseUser
+func (s *Service) DBRequestChannel() <-chan telepathy.DatabaseRequest {
+	if s.dbReq == nil {
+		s.dbReq = make(chan telepathy.DatabaseRequest, 1)
+	}
+	return s.dbReq
 }

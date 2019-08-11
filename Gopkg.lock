@@ -10,7 +10,7 @@
   version = "v0.19.0"
 
 [[projects]]
-  digest = "1:33082c63746b464db3d1c2c07a1396d860484d97fe857ef9e8668a9b406db09f"
+  digest = "1:c950e574951c7199fb3d990d0e7a61996f40f8e646ba7cf8a557878d4c737f53"
   name = "github.com/go-redis/redis"
   packages = [
     ".",
@@ -22,8 +22,8 @@
     "internal/util",
   ]
   pruneopts = "UT"
-  revision = "d22fde8721cc915a55aeb6b00944a76a92bfeb6e"
-  version = "v6.15.2"
+  revision = "75795aa4236dc7341eefac3bbe945e68c99ef9df"
+  version = "v6.15.3"
 
 [[projects]]
   digest = "1:586ea76dbd0374d6fb649a91d70d652b7fe0ccffb8910a77468e7702e7901f3d"
@@ -105,8 +105,8 @@
   version = "v0.3.0"
 
 [[projects]]
-  branch = "tokens-revoked-event"
-  digest = "1:6b1faa8509783c8aa8a3fa6ff7f1d4187b61ad882f1edb1e379ff292bc323bb3"
+  branch = "master"
+  digest = "1:28f898b4381eea56ec90ed32c628711a1eae9190ca86364cee1b43c8b14d74ad"
   name = "github.com/nlopes/slack"
   packages = [
     ".",
@@ -116,16 +116,15 @@
     "slackutilsx",
   ]
   pruneopts = "UT"
-  revision = "c0b2f3d8bc8e116d134780a41d4c165a03f6a7a5"
-  source = "https://github.com/kavenc/slack.git"
+  revision = "0492f2f7dba43c42ad7348e010fdfa5491b6bb77"
 
 [[projects]]
-  digest = "1:e8fcad58263a7511225a674d9c23b9c55aa2f8616e2dab59f184a516f55c6566"
-  name = "github.com/peterhellberg/link"
+  branch = "master"
+  digest = "1:192ae5ee10b592d53a75b5513986dc4d322652d06bdb7eebcb768b842a309213"
+  name = "github.com/patrickmn/go-cache"
   packages = ["."]
   pruneopts = "UT"
-  revision = "d1cebc7ea14a5fc0de7cb4a45acae773161642c6"
-  version = "v1.0.0"
+  revision = "5633e0862627c011927fa39556acae8b1f1df58a"
 
 [[projects]]
   digest = "1:cf31692c14422fa27c83a05292eb5cbe0fb2775972e8f1f8446a71549bd8980b"
@@ -136,12 +135,12 @@
   version = "v0.8.1"
 
 [[projects]]
-  digest = "1:fd61cf4ae1953d55df708acb6b91492d538f49c305b364a014049914495db426"
+  digest = "1:04457f9f6f3ffc5fea48e71d62f2ca256637dee0a04d710288e27e05c8b41976"
   name = "github.com/sirupsen/logrus"
   packages = ["."]
   pruneopts = "UT"
-  revision = "8bdbc7bcc01dcbb8ec23dc8a28e332258d25251f"
-  version = "v1.4.1"
+  revision = "839c75faf7f98a33d445d181f3018b5c3409a45e"
+  version = "v1.4.2"
 
 [[projects]]
   branch = "master"
@@ -169,7 +168,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:9e636d921c7ccc117405cbec11ba83cd3431b014e3cc183bf72222ea0c995720"
+  digest = "1:ff6672a58db94da8b3fe9d59f4279a62ee8f0d8a79131332205eb622bb0fc9e3"
   name = "golang.org/x/crypto"
   packages = [
     "internal/subtle",
@@ -179,7 +178,7 @@
     "salsa20/salsa",
   ]
   pruneopts = "UT"
-  revision = "a29dc8fdc73485234dbef99ebedb95d2eced08de"
+  revision = "4def268fd1a49955bfb3dda92fe3db4f924f2285"
 
 [[projects]]
   branch = "master"
@@ -191,14 +190,14 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:ef6f5a1afcf6996c2a9871649ac6ed5a4ae9f4baea7fd004b8b10aed97ff53d8"
+  digest = "1:78e2de67d4ddf9fd41df5d1baf0e54135ec1fd8f690ea7ba602587f5524534bf"
   name = "golang.org/x/sys"
   packages = [
     "cpu",
     "unix",
   ]
   pruneopts = "UT"
-  revision = "a129542de9ae0895210abff9c95d67a1f33cb93d"
+  revision = "51ab0e2deafac1f46c46ad59cf0921be2f180c3d"
 
 [[projects]]
   digest = "1:1093f2eb4b344996604f7d8b29a16c5b22ab9e1b25652140d3fede39f640d5cd"
@@ -227,7 +226,7 @@
     "github.com/mongodb/mongo-go-driver/mongo/options",
     "github.com/nlopes/slack",
     "github.com/nlopes/slack/slackevents",
-    "github.com/peterhellberg/link",
+    "github.com/patrickmn/go-cache",
     "github.com/sirupsen/logrus",
     "gitlab.com/kavenc/argo",
   ]

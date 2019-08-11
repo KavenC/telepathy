@@ -83,6 +83,11 @@ func (m *cmdManager) worker(id int) {
 			})
 			if err != nil {
 				logger.Errorf("command parsing failed: %s", err.Error())
+				logger.Errorf("msg: %s", msg.Text)
+				logger.Errorf("partial OutputStr: ")
+				logger.Errorf(state.OutputStr.String())
+				state.OutputStr.Reset()
+				state.OutputStr.WriteString("Internal Error! Please try again later.")
 			}
 			if state.OutputStr.Len() != 0 {
 				msg := msg.Reply()

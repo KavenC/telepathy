@@ -11,6 +11,7 @@ import (
 	"gitlab.com/kavenc/telepathy/internal/pkg/line"
 	"gitlab.com/kavenc/telepathy/internal/pkg/slackmsg"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
+	"gitlab.com/kavenc/telepathy/internal/pkg/twitch"
 )
 
 func main() {
@@ -38,6 +39,9 @@ func main() {
 			SigningSecret: []byte(os.Getenv("SLACK_SIGNING_SECRET")),
 		},
 		&fwd.Service{},
+		&twitch.Service{
+			ClientID: os.Getenv("TWITCH_CLIENT_ID"),
+		},
 	}
 
 	session, err := telepathy.NewSession(config, plugins)

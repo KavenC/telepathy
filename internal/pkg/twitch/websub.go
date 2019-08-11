@@ -1,34 +1,83 @@
 package twitch
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const twitchWebSubHubURL = "https://api.twitch.tv/helix/webhooks/hub"
 const twitchWebSubTopicURL = "https://api.twitch.tv/helix/"
 
-func newWebhookTopicURL(topic string) (*url.URL, error) {
-	return url.Parse(twitchWebSubTopicURL + topic)
+type websubReq struct {
+	httpReq *http.Request
+	id      string
 }
 
-func (t *twitchAPI) newWebSubHub() *url.Values {
-	ret := &url.Values{}
-	ret.Set("hub.lease_seconds", "864000")
-	//ret.Set("hub.secret", "")
-	return ret
+// newHubRequest returns a request template to the Twitch Websub Hub
+func (t *twitchAPI) newHubRequest(topic string, topicParams *url.Values, sub bool) (*websubReq, error) {
+	params := url.Values{}
+	callback := *t.webhookURL
+	query := callback.Query()
+	query.Add("topic", topic)
+	callback.RawQuery = query.Encode()
+
+	params.Add("hub.callback", callback.String())
+	if sub {
+		params.Add("hub.mode", "subscribe")
+	} else {
+		params.Add("hub.mode", "unsubscribe")
+	}
+
+	topicURL, err := url.Parse(fmt.Sprintf("%s/%s", apiURL, topic))
+	if err != nil {
+		return nil, err
+	}
+	if topicParams != nil {
+		topicURL.RawQuery = topicParams.Encode()
+	}
+	params.Add("hub.topic", topicURL.String())
+	if sub {
+		params.Add("hub.lease_seconds", "120")
+		params.Add("hub.secret", t.websubSecret)
+	}
+
+	body := ioutil.NopCloser(strings.NewReader(params.Encode()))
+	req, err := t.newRequest("POST", "webhooks/hub", body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	return &websubReq{httpReq: req, id: webSubID(params)}, nil
 }
 
-func webSubKey(query url.Values) string {
+func (t *twitchAPI) websubValidate(response http.ResponseWriter, req *http.Request) {
+	logger := t.logger.WithField("phase", "websubValidate")
+
+	key := webSubID(req.URL.Query())
+	load, ok := t.pendingWebSub.Load(key)
+	if !ok {
+		logger.Warnf("invalid challenge, key: %s, URL: %s", key, req.URL.String())
+		response.WriteHeader(404)
+		return
+	}
+
+	realLease, _ := strconv.Atoi(req.URL.Query().Get("hub.lease_seconds"))
+	realLeaseChan, _ := load.(chan int)
+	realLeaseChan <- realLease
+
+	response.Write([]byte(req.URL.Query().Get("hub.challenge")))
+}
+
+func webSubID(query url.Values) string {
 	return fmt.Sprintf("%s&%s", query.Get("hub.topic"), query.Get("hub.mode"))
 }
 
+/*
 func (t *twitchAPI) requestToHub(ctx context.Context, webSubHub *url.Values) int {
 	localLogger := t.logger.WithField("phase", "reqeustToHub")
 
@@ -90,20 +139,4 @@ func (t *twitchAPI) requestToHub(ctx context.Context, webSubHub *url.Values) int
 	return realLease
 }
 
-func (t *twitchAPI) websubValidate(response http.ResponseWriter, req *http.Request) {
-	localLogger := t.logger.WithField("phase", "websubValidate")
-	key := webSubKey(req.URL.Query())
-	load, ok := t.pendingWebSub.Load(key)
-	if !ok {
-		localLogger.Warnf("invalid challenge, key: %s, URL: %s", key, req.URL.String())
-		response.WriteHeader(404)
-		return
-	}
-
-	realLease, _ := strconv.Atoi(req.URL.Query().Get("hub.lease_seconds"))
-	realLeaseChan, _ := load.(chan int)
-	realLeaseChan <- realLease
-
-	response.WriteHeader(200)
-	response.Write([]byte(req.URL.Query().Get("hub.challenge")))
-}
+*/

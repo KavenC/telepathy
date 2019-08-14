@@ -1,16 +1,15 @@
 package twitch
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
-
-const twitchWebSubHubURL = "https://api.twitch.tv/helix/webhooks/hub"
-const twitchWebSubTopicURL = "https://api.twitch.tv/helix/"
 
 type websubReq struct {
 	httpReq *http.Request
@@ -23,6 +22,13 @@ func (t *twitchAPI) newHubRequest(topic string, topicParams *url.Values, sub boo
 	callback := *t.webhookURL
 	query := callback.Query()
 	query.Add("topic", topic)
+	if topicParams != nil {
+		for key, values := range *topicParams {
+			for _, value := range values {
+				query.Add(key, value)
+			}
+		}
+	}
 	callback.RawQuery = query.Encode()
 
 	params.Add("hub.callback", callback.String())
@@ -41,7 +47,7 @@ func (t *twitchAPI) newHubRequest(topic string, topicParams *url.Values, sub boo
 	}
 	params.Add("hub.topic", topicURL.String())
 	if sub {
-		params.Add("hub.lease_seconds", "120")
+		params.Add("hub.lease_seconds", "864000")
 		params.Add("hub.secret", t.websubSecret)
 	}
 
@@ -73,70 +79,91 @@ func (t *twitchAPI) websubValidate(response http.ResponseWriter, req *http.Reque
 	response.Write([]byte(req.URL.Query().Get("hub.challenge")))
 }
 
+func (t *twitchAPI) websubSubscription(ctx context.Context, topic string, params *url.Values, sub bool) error {
+	logger := t.logger.WithField("phase", "websubSubscription")
+
+	// Construct websub request
+	hubreq, err := t.newHubRequest(topic, params, true)
+	if err != nil {
+		return err
+	}
+
+	// Create channel for waiting verification from hub
+	verified := make(chan int)
+	key := hubreq.id
+	defer close(verified)
+	_, exists := t.pendingWebSub.LoadOrStore(key, verified)
+	if exists {
+		return fmt.Errorf("subscription process racing: %s", key)
+	}
+	defer t.pendingWebSub.Delete(key)
+	// issue the request
+	req := hubreq.httpReq.WithContext(ctx)
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	// Processing http response
+	body, err := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != 202 {
+		return fmt.Errorf("http status code: %d - %s", resp.StatusCode, body)
+	}
+
+	// Wait for verification of intent from hub
+	// This will be handled by the webhook callbacks
+	select {
+	// the verification from hub also provides the actual lease seconds
+	// we will use the lease second to start a subscription renewal routine
+	case realLease := <-verified:
+		if sub {
+			// if this is a subscribe request
+			// start a goroutine to renew the subscription
+			go func() {
+				logger := logger.WithField("phase", "renew")
+				duration := time.Duration(realLease-10) * time.Second
+				// apart from waiting for the lease expired, the routing also accepts early termination
+				// this usually happens when unsubscribed is requested or system shutdown
+				ctx, cancel := context.WithCancel(t.renewCtx)
+				defer cancel()
+
+				// If something goes wrong, we might have a cancel function for another renewal routing
+				// already registered in the table. This does not suppose to happen, but when it do, we
+				// cancel the other ones before filling in ours.
+				// Also produces warning messages so that we will know this from logs
+				for actual, loaded := t.renewCancel.LoadOrStore(key, cancel); loaded; {
+					previousCancel, _ := actual.(context.CancelFunc)
+					logger.Warnf("cancelling overlapped renewal routine: %s", key)
+					previousCancel()
+				}
+
+				select {
+				case <-time.After(duration):
+					t.renewCancel.Delete(key)
+					ctx, subCancel := context.WithTimeout(t.renewCtx, reqTimeOut)
+					defer subCancel()
+					logger.Infof("renewing websub: %s", key)
+					err := t.websubSubscription(ctx, topic, params, true)
+					if err != nil {
+						logger.Errorf(err.Error())
+					}
+				case <-ctx.Done():
+					// renew routine cancelled
+					t.renewCancel.Delete(key)
+					logger.Warnf("renew cancelled: %s", key)
+				}
+			}()
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("verification timeout")
+	}
+}
+
 func webSubID(query url.Values) string {
 	return fmt.Sprintf("%s&%s", query.Get("hub.topic"), query.Get("hub.mode"))
 }
-
-/*
-func (t *twitchAPI) requestToHub(ctx context.Context, webSubHub *url.Values) int {
-	localLogger := t.logger.WithField("phase", "reqeustToHub")
-
-	// Create channel to wait for Hub validation
-	topic := webSubHub.Get("hub.topic")
-	mode := webSubHub.Get("hub.mode")
-	if topic == "" || mode == "" {
-		localLogger.Errorf("invalid WebSubHub: topic: %s, mode: %s", topic, mode)
-		return 0
-	}
-
-	key := webSubKey(*webSubHub)
-	realLeaseChan := make(chan int)
-	_, exists := t.pendingWebSub.LoadOrStore(key, realLeaseChan)
-	if exists {
-		localLogger.Warnf("skipping subscription (ongoing): %s", key)
-		return 0
-	}
-	defer t.pendingWebSub.Delete(key)
-
-	// Send subscription request
-	req, err := t.newRequest("POST", "webhooks/hub", strings.NewReader(webSubHub.Encode()))
-	if err != nil {
-		localLogger.Errorf("failed to create hub request: %s", err.Error())
-		return 0
-	}
-
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	respChan := make(chan *http.Response)
-	errChan := make(chan error)
-	go t.sendReq(ctx, req, respChan, errChan)
-
-	var resp *http.Response
-	select {
-	case resp = <-respChan:
-		defer resp.Body.Close()
-		break
-	case err := <-errChan:
-		localLogger.Errorf("failed to send request to hub: %s", err.Error())
-		return 0
-	case <-ctx.Done():
-		localLogger.Warn("timed-out / cancelled")
-		return 0
-	}
-
-	// Handle response
-	if resp.StatusCode != 202 {
-		body, _ := ioutil.ReadAll(resp.Body)
-		localLogger.Errorf("invalid response from hub, status: %d, body: %s", resp.StatusCode, body)
-		return 0
-	}
-
-	// Wait for hub validation done
-	localLogger.Infof("websub request sent, waiting for challenge...")
-	realLease := <-realLeaseChan
-	localLogger.Infof("websub request done. Lease seconds: %d", realLease)
-	return realLease
-}
-
-*/

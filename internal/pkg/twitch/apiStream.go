@@ -36,19 +36,23 @@ type streamQuery struct {
 }
 
 func (t *twitchAPI) printStream(ctx context.Context, stream Stream, userLogin string) string {
-	game := <-t.gameByID(ctx, stream.GameID)
-	var gameName string
-	if game == nil {
-		gameName = stream.GameID
-	} else {
-		gameName = game.Name
-	}
-	return fmt.Sprintf(`- Title: %s
-- Streamer: %s (%s)
-- Game: %s
+	if !stream.offline {
+		game := <-t.gameByID(ctx, stream.GameID)
+		var gameName string
+		if game == nil {
+			gameName = stream.GameID
+		} else {
+			gameName = game.Name
+		}
+
+		return fmt.Sprintf(`- Streamer: %s (%s)
+- Title: %s
+- Playing: %s
 - Viewer Count: %d
-- Link: %s`, stream.Title, stream.UserName, userLogin,
-		gameName, stream.ViewerCount, twitchURL+userLogin)
+- Link: %s`, stream.UserName, userLogin, stream.Title,
+			gameName, stream.ViewerCount, twitchURL+userLogin)
+	}
+	return "offline"
 }
 
 func (t *twitchAPI) getStreams(ctx context.Context, sq streamQuery) (*StreamList, error) {
@@ -223,86 +227,5 @@ func (s *twitchService) streamChangedAdd(userid string, channel telepathy.Channe
 	return true, nil
 }
 
-// streamChanged handles webhook callbacks for stream changed event
-func (s *twitchService) streamChanged(ctx context.Context, request *http.Request, resp chan int) {
-	localLogger := s.logger.WithField("phase", "streamChanged")
 
-	headerLinks := link.ParseRequest(request)
-	topicURL, _ := url.Parse(headerLinks["self"].URI)
-	userID := topicURL.Query().Get("user_id")
-	chList, ok := s.webhookSubs[whTopicStream].GetList(userID)
-	if !ok {
-		// no subscribers, reply 410 to terminate the subscription
-		localLogger.Warnf("get callback but not subscribers, do unsub. user_id: %s", userID)
-		resp <- 410
-		return
-	}
-
-	// Get user display name
-	var userName string
-	errChan := make(chan error)
-	respChan := make(chan *User)
-	ctx, cancel := context.WithTimeout(s.ctx, reqTimeOut)
-	defer cancel()
-	go s.api.fetchUserWithID(ctx, userID, respChan, errChan)
-
-	// Read callback body
-	decoder := json.NewDecoder(request.Body)
-	var streamList StreamList
-	err := decoder.Decode(&streamList)
-	resp <- 200
-	if err != nil {
-		localLogger.Error("failed to read request body")
-		return
-	}
-
-	var user *User
-	select {
-	case user = <-respChan:
-		if user == nil {
-			localLogger.Warnf("user not found, id: %s", userID)
-			userName = fmt.Sprintf("UserID: %s", userID)
-			break
-		}
-		userName = user.DisplayName
-	case err := <-errChan:
-		localLogger.Error(err.Error())
-		userName = fmt.Sprintf("UserID: %s", userID)
-	case <-ctx.Done():
-		localLogger.Warnf("Request timeout, please try again later.")
-		userName = fmt.Sprintf("UserID: %s", userID)
-	}
-
-	// Construct message
-	var msg string
-	if len(streamList.Data) == 0 {
-		msg = fmt.Sprintf("%s stream goes offline.", userName)
-		s.streamStatus.Store(userID, false)
-	} else {
-		value, loaded := s.streamStatus.LoadOrStore(userID, true)
-		if !loaded {
-			localLogger.Warnf("no stream status when getting callback")
-		}
-		status, _ := value.(bool)
-		if status {
-			msg = "== Twitch Stream Update ==\n"
-		} else {
-			msg = "== Twitch Stream Online ==\n"
-		}
-		stream := streamList.Data[0]
-		msg += fmt.Sprintf(`- Title: %s
-- Streamer: %s
-- Link: %s`, stream.Title, userName, twitchURL+user.Login)
-	}
-
-	// Broadcast message
-	for channel := range chList {
-		messenger, _ := s.session.Message.Messenger(channel.MessengerID)
-		outMsg := telepathy.OutboundMessage{
-			TargetID: channel.ChannelID,
-			Text:     msg,
-		}
-		messenger.Send(&outMsg)
-	}
-}
 */

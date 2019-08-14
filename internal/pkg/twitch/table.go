@@ -72,11 +72,18 @@ func (t *table) add(key string, channel telepathy.Channel) bool {
 	return true
 }
 
-func (t *table) getList(key string) (list map[telepathy.Channel]bool, ok bool) {
+func (t *table) getList(key string) (map[telepathy.Channel]bool, bool) {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
-	list, ok = t.data[key]
-	return
+	copy := make(map[telepathy.Channel]bool)
+	list, ok := t.data[key]
+	if !ok {
+		return copy, ok
+	}
+	for ch := range list {
+		copy[ch] = true
+	}
+	return copy, ok
 }
 
 func (t *table) bson() *bson.A {

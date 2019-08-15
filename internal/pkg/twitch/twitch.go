@@ -11,14 +11,16 @@ import (
 
 	"gitlab.com/kavenc/telepathy/internal/pkg/randstr"
 
+	"github.com/mongodb/mongo-go-driver/bson"
+	"github.com/mongodb/mongo-go-driver/mongo"
+	"github.com/mongodb/mongo-go-driver/mongo/options"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
-// ID is the plugin id
-const id = "twitch"
-
-const twitchURL = "https://www.twitch.tv/"
+const (
+	twitchURL = "https://www.twitch.tv/"
+)
 
 type notification struct {
 	request *http.Request
@@ -94,10 +96,21 @@ func (s *Service) Start() {
 	s.api.logger = s.logger.WithField("module", "api")
 
 	s.subTopics = make(map[string]*table)
-	// - Supported Topics
-	s.subTopics["streams"] = newTable()
 
-	// - TODO: Load Table content from database
+	// - Supported Topics
+	wg := sync.WaitGroup{}
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeOut)
+	s.subTopics["streams"] = newTable()
+	s.loadFromDB("streams")
+	for _, userID := range s.subTopics["streams"].getKeys() {
+		wg.Add(1)
+		go func(id string) {
+			<-s.subscribeStream(ctx, id)
+			wg.Done()
+		}(userID)
+	}
+	wg.Wait()
+	cancel()
 
 	go s.notifHandler()
 
@@ -105,17 +118,19 @@ func (s *Service) Start() {
 	// Wait for close
 	<-s.cmdDone
 
-	// TODO: write back db
+	// write back db
+	dbDone := s.writeToDB("streams")
 
 	// Cancel all websub renewal routines
 	s.renewCancel()
 
 	// Terminate websub handling
-	<-s.notifDone
 	close(s.notifQueue)
+	<-s.notifDone
 	close(s.msgOut)
 
 	// wait for writeback
+	<-dbDone
 	close(s.dbReq)
 
 	s.logger.Info("terminated")
@@ -140,4 +155,49 @@ func (s *Service) DBRequestChannel() <-chan telepathy.DatabaseRequest {
 		s.dbReq = make(chan telepathy.DatabaseRequest, 1)
 	}
 	return s.dbReq
+}
+
+func (s *Service) writeToDB(topic string) chan interface{} {
+	logger := s.logger.WithField("phase", "writeToDB")
+	retCh := make(chan interface{}, 1)
+	tableBSON := s.subTopics[topic].bson()
+	s.dbReq <- telepathy.DatabaseRequest{
+		Action: func(ctx context.Context, db *mongo.Database) interface{} {
+			dbBSON := bson.M{"ID": topic, "Table": *tableBSON}
+			collection := db.Collection("twitch")
+			result, err := collection.ReplaceOne(ctx,
+				map[string]string{"ID": topic}, dbBSON, options.Replace().SetUpsert(true))
+			if err != nil {
+				logger.Error("error when writing table back to DB: " + err.Error())
+			}
+			return result
+		},
+		Return: retCh,
+	}
+	return retCh
+}
+
+func (s *Service) loadFromDB(topic string) error {
+	retCh := make(chan interface{}, 1)
+	s.dbReq <- telepathy.DatabaseRequest{
+		Action: func(ctx context.Context, db *mongo.Database) interface{} {
+			collection := db.Collection("twitch")
+			result := collection.FindOne(ctx, map[string]string{"ID": topic})
+			raw, err := result.DecodeBytes()
+			if err != nil {
+				return err
+			}
+			return raw.Lookup("Table")
+		},
+		Return: retCh,
+	}
+
+	// Wait until DB operation is done
+	result := <-retCh
+	if err, ok := result.(error); ok {
+		return err
+	}
+
+	bsonValue, _ := result.(bson.RawValue)
+	return s.subTopics[topic].fromBSON(bsonValue)
 }

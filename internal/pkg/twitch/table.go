@@ -18,6 +18,16 @@ func newTable() *table {
 	}
 }
 
+func (t *table) getKeys() []string {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	ret := make([]string, 0, len(t.data))
+	for id := range t.data {
+		ret = append(ret, id)
+	}
+	return ret
+}
+
 func (t *table) lookUpOrAdd(key string, channel telepathy.Channel) (keyExists bool, chExists bool) {
 	t.lock.Lock()
 	defer t.lock.Unlock()

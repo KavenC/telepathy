@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -25,26 +24,17 @@ type twitchAPI struct {
 	webhookURL   *url.URL
 	httpClient   *http.Client
 
-	pendingWebSub sync.Map
-
 	userIDCache *cache.Cache // login -> user id
 	gameCache   *cache.Cache // game id -> Game
-
-	renewCtx       context.Context // context controls all websub renewal routines
-	renewCancelAll context.CancelFunc
-	renewCancel    sync.Map
 
 	logger *logrus.Entry
 }
 
 func newTwitchAPI() *twitchAPI {
-	ctx, cancel := context.WithCancel(context.Background())
 	return &twitchAPI{
-		httpClient:     &http.Client{},
-		userIDCache:    cache.New(cacheExpire, cacheExpire),
-		gameCache:      cache.New(cacheExpire, cacheExpire),
-		renewCtx:       ctx,
-		renewCancelAll: cancel,
+		httpClient:  &http.Client{},
+		userIDCache: cache.New(cacheExpire, cacheExpire),
+		gameCache:   cache.New(cacheExpire, cacheExpire),
 	}
 }
 
@@ -215,25 +205,5 @@ func (t *twitchAPI) gameByID(ctx context.Context, gameID string) <-chan *Game {
 		return
 	}()
 
-	return ret
-}
-
-// subscribeStream subscribes to stream changed event
-// If error happened, returned channel will be closed without pushing
-// Otherwise, returns nil
-func (t *twitchAPI) subscribeStream(ctx context.Context, userID string) <-chan interface{} {
-	logger := t.logger.WithField("phase", "subscribeStream")
-	ret := make(chan interface{})
-	go func() {
-		defer close(ret)
-		hubparams := make(url.Values)
-		hubparams.Add("user_id", userID)
-		err := t.websubSubscription(ctx, "streams", &hubparams, true)
-		if err != nil {
-			logger.Errorf(err.Error())
-			return
-		}
-		ret <- nil
-	}()
 	return ret
 }

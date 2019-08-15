@@ -61,11 +61,11 @@ func (t *twitchAPI) newHubRequest(topic string, topicParams *url.Values, sub boo
 	return &websubReq{httpReq: req, id: webSubID(params)}, nil
 }
 
-func (t *twitchAPI) websubValidate(response http.ResponseWriter, req *http.Request) {
-	logger := t.logger.WithField("phase", "websubValidate")
+func (s *Service) websubValidate(response http.ResponseWriter, req *http.Request) {
+	logger := s.logger.WithField("phase", "websubValidate")
 
 	key := webSubID(req.URL.Query())
-	load, ok := t.pendingWebSub.Load(key)
+	load, ok := s.verifyingSubs.Load(key)
 	if !ok {
 		logger.Warnf("invalid challenge, key: %s, URL: %s", key, req.URL.String())
 		response.WriteHeader(404)
@@ -79,11 +79,66 @@ func (t *twitchAPI) websubValidate(response http.ResponseWriter, req *http.Reque
 	response.Write([]byte(req.URL.Query().Get("hub.challenge")))
 }
 
-func (t *twitchAPI) websubSubscription(ctx context.Context, topic string, params *url.Values, sub bool) error {
-	logger := t.logger.WithField("phase", "websubSubscription")
+func webSubID(query url.Values) string {
+	return fmt.Sprintf("%s&%s", query.Get("hub.topic"), query.Get("hub.mode"))
+}
+
+func (s *Service) handleNotification(req *http.Request, body []byte) <-chan int {
+	status := make(chan int, 1)
+	notification := notification{
+		request: req,
+		body:    body,
+		status:  status,
+	}
+	go func() {
+		select {
+		case s.notifQueue <- &notification:
+		case <-req.Context().Done():
+			// this request is dropped
+			s.logger.WithField("phase", "handleNotification").Warnf("notification dropped")
+			status <- 200
+		}
+	}()
+	return status
+}
+
+// notifHandler handles websub notification callbacks in centeralized manner
+// we need to predefine the handlers so that it is possible to gracefully shutdown everything
+func (s *Service) notifHandler() {
+	logger := s.logger.WithField("phase", "notifHandler")
+	for notification := range s.notifQueue {
+		req := notification.request
+		ret := notification.status
+		body := notification.body
+		// A "topic" query is appended as callback url when subscribing
+		// Here we can use the "topic" query to identify the topic of this callback request
+		topic := req.URL.Query()["topic"]
+		if topic == nil {
+			logger.Warnf("invalid callback with no topic query. URL: %s", req.URL.String())
+			ret <- 400
+			continue
+		}
+
+		// Take only the first mode parameters, ignore others
+		switch topic[0] {
+		case "streams":
+			// stream changed
+			ret <- s.streamChanged(req, body)
+		default:
+			// return sub as deleted for any unknown topics
+			logger.Warnf("unknown topic. URL: %s", req.URL.String())
+			ret <- 410
+		}
+	}
+	close(s.notifDone)
+}
+
+// subscribe/unsubscribe to a websub topic
+func (s *Service) subscription(ctx context.Context, topic string, params *url.Values, sub bool) error {
+	logger := s.logger.WithField("phase", "subscription")
 
 	// Construct websub request
-	hubreq, err := t.newHubRequest(topic, params, true)
+	hubreq, err := s.api.newHubRequest(topic, params, true)
 	if err != nil {
 		return err
 	}
@@ -92,14 +147,15 @@ func (t *twitchAPI) websubSubscription(ctx context.Context, topic string, params
 	verified := make(chan int)
 	key := hubreq.id
 	defer close(verified)
-	_, exists := t.pendingWebSub.LoadOrStore(key, verified)
+	_, exists := s.verifyingSubs.LoadOrStore(key, verified)
 	if exists {
 		return fmt.Errorf("subscription process racing: %s", key)
 	}
-	defer t.pendingWebSub.Delete(key)
+	defer s.verifyingSubs.Delete(key)
+
 	// issue the request
 	req := hubreq.httpReq.WithContext(ctx)
-	resp, err := t.httpClient.Do(req)
+	resp, err := s.api.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -128,14 +184,14 @@ func (t *twitchAPI) websubSubscription(ctx context.Context, topic string, params
 				duration := time.Duration(realLease-10) * time.Second
 				// apart from waiting for the lease expired, the routing also accepts early termination
 				// this usually happens when unsubscribed is requested or system shutdown
-				ctx, cancel := context.WithCancel(t.renewCtx)
+				ctx, cancel := context.WithCancel(s.renewCtx)
 				defer cancel()
 
 				// If something goes wrong, we might have a cancel function for another renewal routing
 				// already registered in the table. This does not suppose to happen, but when it do, we
 				// cancel the other ones before filling in ours.
 				// Also produces warning messages so that we will know this from logs
-				for actual, loaded := t.renewCancel.LoadOrStore(key, cancel); loaded; {
+				for actual, loaded := s.renewCancelMap.LoadOrStore(key, cancel); loaded; {
 					previousCancel, _ := actual.(context.CancelFunc)
 					logger.Warnf("cancelling overlapped renewal routine: %s", key)
 					previousCancel()
@@ -143,17 +199,22 @@ func (t *twitchAPI) websubSubscription(ctx context.Context, topic string, params
 
 				select {
 				case <-time.After(duration):
-					t.renewCancel.Delete(key)
-					ctx, subCancel := context.WithTimeout(t.renewCtx, reqTimeOut)
+					s.renewCancelMap.Delete(key)
+					if !s.subTopics[topic].hasKey(hubreq.id) {
+						// unsubscribed
+						logger.Infof("renew terminated: %s", key)
+						return
+					}
+
+					ctx, subCancel := context.WithTimeout(s.renewCtx, reqTimeOut)
 					defer subCancel()
 					logger.Infof("renewing websub: %s", key)
-					err := t.websubSubscription(ctx, topic, params, true)
+					err := s.subscription(ctx, topic, params, true)
 					if err != nil {
 						logger.Errorf(err.Error())
 					}
 				case <-ctx.Done():
 					// renew routine cancelled
-					t.renewCancel.Delete(key)
 					logger.Warnf("renew cancelled: %s", key)
 				}
 			}()
@@ -162,8 +223,4 @@ func (t *twitchAPI) websubSubscription(ctx context.Context, topic string, params
 	case <-ctx.Done():
 		return fmt.Errorf("verification timeout")
 	}
-}
-
-func webSubID(query url.Values) string {
-	return fmt.Sprintf("%s&%s", query.Get("hub.topic"), query.Get("hub.mode"))
 }

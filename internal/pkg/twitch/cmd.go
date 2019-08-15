@@ -82,7 +82,7 @@ func (s *Service) subStream(state *argo.State, extraArgs ...interface{}) error {
 	}
 
 	// Check if already subscribed
-	subtable := s.webhookSubs["streams"]
+	subtable := s.subTopics["streams"]
 	channel := extArg.Message.FromChannel
 	userIDExists, channelExists := subtable.lookUpOrAdd(*userID, channel)
 	if channelExists {
@@ -113,7 +113,7 @@ func (s *Service) subStream(state *argo.State, extraArgs ...interface{}) error {
 	}
 
 	// Do Websub flow
-	subResult := s.api.subscribeStream(ctx, *userID)
+	subResult := s.subscribeStream(ctx, *userID)
 
 	select {
 	case _, subOk := <-subResult:
@@ -131,47 +131,40 @@ func (s *Service) subStream(state *argo.State, extraArgs ...interface{}) error {
 }
 
 func (s *Service) unsubStream(state *argo.State, extraArgs ...interface{}) error {
-	/*
-		streamUser := state.Args()[0]
-		errChan := make(chan error)
-		respChan := make(chan *User)
-		ctx, cancel := context.WithTimeout(s.ctx, reqTimeOut)
-		defer cancel()
-		go s.api.fetchUser(ctx, streamUser, respChan, errChan)
+	userLogin := state.Args()[0]
+	extArg, ok := extraArgs[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		return errors.New("invalid extra args")
+	}
 
-		localLogger := s.logger.WithField("cmd", "stream")
+	ctx, cancel := context.WithTimeout(extArg.Ctx, reqTimeOut)
+	defer cancel()
+	userID, ok := <-s.api.userIDByLogin(ctx, userLogin)
 
-		extArg, ok := extraArgs[0].(telepathy.CmdExtraArgs)
-		if !ok {
-			localLogger.Error("invalid extra args")
-			return errors.New("invalid extra args")
-		}
+	if !ok {
+		return errors.New("subStream/userIDByLogin failed")
+	}
 
-		fromChannel := extArg.Message.FromChannel
+	if userID == nil {
+		fmt.Fprintf(&state.OutputStr, "Twitch user not found: %s", userLogin)
+		return nil
+	}
 
-		select {
-		case User := <-respChan:
-			if User == nil {
-				fmt.Fprintf(&state.OutputStr, "Twitch User not found: %s", streamUser)
-				return nil
-			}
-			ok, err := s.streamChangedDel(User.ID, fromChannel)
-			if err != nil {
-				localLogger.Error(err.Error())
-				state.OutputStr.WriteString("Internal Error.")
-			}
-			if !ok {
-				fmt.Fprintf(&state.OutputStr, "This channel has not yet subscribed to Twitch User: %s", User.DisplayName)
-				return nil
-			}
-			fmt.Fprintf(&state.OutputStr, "Successfully unsubscribed to Twitch User: %s", User.DisplayName)
-		case err := <-errChan:
-			localLogger.Error(err.Error())
-			state.OutputStr.WriteString("Internal error.")
-		case <-ctx.Done():
-			fmt.Fprintf(&state.OutputStr, "Request timeout, please try again later.")
-		}
-	*/
+	// Check if subscribed
+	subtable := s.subTopics["streams"]
+	channel := extArg.Message.FromChannel
+	_, channelRemoved := subtable.remove(*userID, channel)
+	if !channelRemoved {
+		fmt.Printf("This channel didn't subscribed to: %s", userLogin)
+		return nil
+	}
+
+	// Note: We dont really do unsubsscribe request here
+	// the subscription will be terminated when:
+	// 1. Receiving notification and we respond with 410
+	// 2. When renewing routine comes up and find out that there is no subscribers
+	fmt.Printf("Unsubscribed to: %s", userLogin)
+
 	return nil
 }
 
@@ -182,7 +175,7 @@ func (s *Service) listSubs(state *argo.State, extraArgs ...interface{}) error {
 	}
 	channel := extArg.Message.FromChannel
 	fmt.Fprint(&state.OutputStr, "== Twitch Stream Subs ==")
-	subs := s.webhookSubs["streams"].contains(channel)
+	subs := s.subTopics["streams"].contains(channel)
 	if len(subs) == 0 {
 		return nil
 	}
@@ -251,8 +244,7 @@ func (s *Service) queryStream(state *argo.State, extraArgs ...interface{}) error
 		}
 		if stream.offline {
 			fmt.Fprintf(&state.OutputStr, `== Twitch Stream ==
-- User: %s, stream offline
-		`, userLogin)
+- User: %s, stream offline`, userLogin)
 			return nil
 		}
 

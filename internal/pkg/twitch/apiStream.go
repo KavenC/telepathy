@@ -6,7 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net/http"
+	"net/url"
+	"strings"
 	"time"
+
+	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
 // A Stream represents a twtich stream
@@ -101,131 +106,111 @@ func (t *twitchAPI) getStreams(ctx context.Context, sq streamQuery) (*StreamList
 	return streams, nil
 }
 
-/*
-var subStreamLock sync.Mutex
-func (s *twitchService) streamChangeWriteToDB() chan interface{} {
-	retCh := make(chan interface{}, 1)
-	s.session.DB.PushRequest(&telepathy.DatabaseRequest{
-		Action: func(ctx context.Context, db *mongo.Database) interface{} {
-			collection := db.Collection(ID)
-			result, err := s.webhookSubs[whTopicStream].StoreToDB(ctx, collection, whTopicStream)
-			if err != nil {
-				s.logger.Error("error when store to DB: " + err.Error())
-			}
-			return result
-		},
-		Return: retCh,
-	})
-	return retCh
-}
-
-func (s *twitchService) streamChangeLoadFromDB() {
-	retCh := make(chan interface{}, 1)
-	s.session.DB.PushRequest(&telepathy.DatabaseRequest{
-		Action: func(ctx context.Context, db *mongo.Database) interface{} {
-			s.webhookSubs[whTopicStream] = telepathy.NewChannelListMap()
-			collection := db.Collection(ID)
-			err := s.webhookSubs[whTopicStream].LoadFromDB(ctx, collection, whTopicStream, reflect.TypeOf(""))
-			if err != nil {
-				s.logger.Error("error when load from DB: " + err.Error())
-			}
-			s.logger.Info("load from DB done")
-			return err
-		},
-		Return: retCh,
-	})
-	<-retCh
-
-	// After load from db, resubscribe to websub topic
-	s.webhookSubs[whTopicStream].Range(func(key interface{}, _ telepathy.ChannelList) bool {
-		userid, _ := key.(string)
-		err := s.subscribeStream(userid)
-		if err != nil {
-			s.logger.WithField("phase", "loadFromDB").Errorf("subscribe stream failed: %s", err.Error())
-		}
-		return true
-	})
-	return
-}
-
-func (s *twitchService) streamChangedDel(userid string, channel telepathy.Channel) (bool, error) {
-	if !s.webhookSubs[whTopicStream].DelChannel(userid, channel) {
-		return false, nil
-	}
-
-	if !s.webhookSubs[whTopicStream].KeyExists(userid) {
-		s.streamStatus.Delete(userid)
-	}
-
-	// We don't explicitly send unsubscribe request to hub. The subscription will be either expired or rejected at next
-	// callback
-	s.streamChangeWriteToDB()
-
-	return true, nil
-}
-
-func (s *twitchService) subscribeStream(userid string) error {
-	subStreamLock.Lock()
-	defer subStreamLock.Unlock()
-	_, loaded := s.streamStatus.LoadOrStore(userid, false)
-	if loaded {
-		// already subscribed
-		return nil
-	}
-
-	// Send subscription request to twitch websub hub
-	webSubHub := s.api.newWebSubHub()
-	webSubHub.Set("hub.mode", "subscribe")
-
-	callbackURL, _ := url.Parse(s.webhookURL.String())
-	query := callbackURL.Query()
-	query.Set("topic", whTopicStream)
-	callbackURL.RawQuery = query.Encode()
-	webSubHub.Set("hub.callback", callbackURL.String())
-
-	topicURL, err := newWebhookTopicURL(whTopicStream)
-	if err != nil {
-		return err
-	}
-	query = topicURL.Query()
-	query.Set("user_id", userid)
-	topicURL.RawQuery = query.Encode()
-	webSubHub.Set("hub.topic", topicURL.String())
-
-	// Do websub sub process
+// subscribeStream subscribes to stream changed event
+// If error happened, returned channel will be closed without pushing
+// Otherwise, returns nil
+func (s *Service) subscribeStream(ctx context.Context, userID string) <-chan interface{} {
+	logger := s.logger.WithField("phase", "subscribeStream")
+	ret := make(chan interface{})
 	go func() {
-		lease := s.api.requestToHub(s.ctx, webSubHub)
+		defer close(ret)
+		hubparams := make(url.Values)
+		hubparams.Add("user_id", userID)
+		err := s.subscription(ctx, "streams", &hubparams, true)
+		if err != nil {
+			logger.Errorf(err.Error())
+			return
+		}
+		ret <- nil
+	}()
+	return ret
+}
 
-		// create update function
-		go func() {
-			sleepSec := lease - 60
-			if sleepSec <= 0 {
-				s.logger.Warnf("Short lease: %d, skipping websub update.", lease)
+// streamChanged handles webhook callbacks for stream changed event
+func (s *Service) streamChanged(request *http.Request, body []byte) int {
+	logger := s.logger.WithField("phase", "streamChanged")
+
+	userID := request.URL.Query().Get("user_id")
+	chList, ok := s.subTopics["streams"].getList(userID)
+	if !ok {
+		// no subscribers, reply 410 to terminate the subscription
+		logger.Warnf("get callback but not subscribers, do unsub. user_id: %s", userID)
+		return 410
+	}
+
+	// start a goroutine for the rest of process and return 200 for this request
+	go func() {
+		if !ok {
+			return
+		}
+
+		// Get user display name
+		ctx, cancel := context.WithTimeout(s.notifCtx, reqTimeOut)
+		userChan := s.api.userByID(ctx, userID)
+		defer cancel()
+
+		// Unmarshal callback body
+		var streamList StreamList
+		err := json.Unmarshal(body, &streamList)
+		if err != nil {
+			logger.Error("failed to decode request body")
+			<-userChan
+			return
+		}
+
+		var user *User
+		select {
+		case user, ok = <-userChan:
+			if !ok {
+				return
+			} else if user == nil {
+				logger.Errorf("user not found, id: %s", userID)
 				return
 			}
-			time.Sleep(time.Duration(sleepSec) * time.Second)
-			s.subscribeStream(userid)
-		}()
+		case <-ctx.Done():
+			logger.Warnf("userById timeout/cancelled")
+			return
+		}
+
+		// Construct message
+		var msg strings.Builder
+		if len(streamList.Data) == 0 {
+			fmt.Fprintf(&msg, "== Twitch Stream Offline==\n- Streamer: %s (%s)",
+				user.DisplayName, user.Login)
+			s.streamStatus.Store(userID, false)
+		} else {
+			stream := streamList.Data[0]
+			value, loaded := s.streamStatus.LoadOrStore(userID, true)
+			var status bool
+			if !loaded {
+				status = false
+			} else {
+				status, _ = value.(bool)
+				s.streamStatus.Store(userID, true)
+			}
+			if status {
+				fmt.Fprintf(&msg, "== Twitch Stream Update ==\n%s",
+					s.api.printStream(s.notifCtx, stream, user.Login))
+			} else {
+				fmt.Fprintf(&msg, "== Twitch Stream Online ==\n%s",
+					s.api.printStream(s.notifCtx, stream, user.Login))
+			}
+		}
+
+		// Broadcast message
+		for channel := range chList {
+			outMsg := telepathy.OutboundMessage{
+				ToChannel: channel,
+				Text:      msg.String(),
+			}
+			select {
+			case s.msgOut <- outMsg:
+			case <-s.notifCtx.Done():
+				logger.Warnf("message cancelled")
+				break
+			}
+		}
 	}()
 
-	return nil
+	return 200
 }
-
-func (s *twitchService) streamChangedAdd(userid string, channel telepathy.Channel) (bool, error) {
-	added := s.webhookSubs[whTopicStream].AddChannel(userid, channel)
-	if !added {
-		return false, nil
-	}
-
-	err := s.subscribeStream(userid)
-	if err != nil {
-		s.webhookSubs[whTopicStream].DelChannel(userid, channel)
-		return false, err
-	}
-
-	s.streamChangeWriteToDB()
-	return true, nil
-}
-
-
-*/

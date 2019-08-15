@@ -30,7 +30,7 @@ func (s *Service) SetWebhookURL(urlmap map[string]*url.URL) {
 
 func (s *Service) webhook(response http.ResponseWriter, req *http.Request) {
 	if req.Method == "GET" {
-		s.api.websubValidate(response, req)
+		s.websubValidate(response, req)
 		return
 	}
 
@@ -94,5 +94,5 @@ func (s *Service) handleWebhookReq(req *http.Request) int {
 		return 200
 	}
 
-	return <-s.handleWebsubNotification(req, body)
+	return <-s.handleNotification(req, body)
 }

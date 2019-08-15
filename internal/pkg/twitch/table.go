@@ -46,22 +46,23 @@ func (t *table) contains(channel telepathy.Channel) []string {
 	return ret
 }
 
-func (t *table) remove(key string, channel telepathy.Channel) bool {
+func (t *table) remove(key string, channel telepathy.Channel) (keyRemoved bool, chRemoved bool) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	chmap, keyExists := t.data[key]
 	if !keyExists {
-		return false
+		return false, false
 	}
 	_, chExists := chmap[channel]
 	if !chExists {
-		return false
+		return false, false
 	}
 	delete(chmap, channel)
 	if len(chmap) == 0 {
 		delete(t.data, key)
+		return true, true
 	}
-	return true
+	return false, true
 }
 
 // add an item into table.
@@ -82,6 +83,13 @@ func (t *table) add(key string, channel telepathy.Channel) bool {
 
 	chmap[channel] = true
 	return true
+}
+
+func (t *table) hasKey(key string) bool {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	_, ok := t.data[key]
+	return ok
 }
 
 func (t *table) getList(key string) (map[telepathy.Channel]bool, bool) {

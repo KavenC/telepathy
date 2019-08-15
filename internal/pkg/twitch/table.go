@@ -34,6 +34,18 @@ func (t *table) lookUpOrAdd(key string, channel telepathy.Channel) (keyExists bo
 	return
 }
 
+func (t *table) contains(channel telepathy.Channel) []string {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	ret := make([]string, 0, len(t.data))
+	for key, list := range t.data {
+		if _, ok := list[channel]; ok {
+			ret = append(ret, key)
+		}
+	}
+	return ret
+}
+
 func (t *table) remove(key string, channel telepathy.Channel) bool {
 	t.lock.Lock()
 	defer t.lock.Unlock()

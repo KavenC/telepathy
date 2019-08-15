@@ -35,6 +35,12 @@ func (s *Service) Command(done <-chan interface{}) *argo.Action {
 	})
 
 	cmd.AddSubAction(argo.Action{
+		Trigger:    "listsubs",
+		ShortDescr: "List subscribed Twitch streams",
+		Do:         s.listSubs,
+	})
+
+	cmd.AddSubAction(argo.Action{
 		Trigger:    "user",
 		ShortDescr: "Get user information",
 		ArgNames:   []string{"user-name"},
@@ -169,6 +175,29 @@ func (s *Service) unsubStream(state *argo.State, extraArgs ...interface{}) error
 	return nil
 }
 
+func (s *Service) listSubs(state *argo.State, extraArgs ...interface{}) error {
+	extArg, ok := extraArgs[0].(telepathy.CmdExtraArgs)
+	if !ok {
+		return errors.New("invalid extra args")
+	}
+	channel := extArg.Message.FromChannel
+	fmt.Fprint(&state.OutputStr, "== Twitch Stream Subs ==")
+	subs := s.webhookSubs["streams"].contains(channel)
+	if len(subs) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(extArg.Ctx, reqTimeOut)
+	defer cancel()
+	users, err := s.api.getUsers(ctx, userQuery{id: subs})
+	if err != nil {
+		return err
+	}
+	for _, user := range users.Data {
+		fmt.Fprintf(&state.OutputStr, "\n%s (%s)", user.DisplayName, user.Login)
+	}
+	return nil
+}
+
 func (s *Service) queryUser(state *argo.State, extraArgs ...interface{}) error {
 	extArg, ok := extraArgs[0].(telepathy.CmdExtraArgs)
 	if !ok {
@@ -195,8 +224,7 @@ func (s *Service) queryUser(state *argo.State, extraArgs ...interface{}) error {
 - Login Name: %s
 - Display Name: %s
 - Description:
-%s
-`, user.Login, user.DisplayName, user.Description)
+%s`, user.Login, user.DisplayName, user.Description)
 	case <-ctx.Done():
 		fmt.Fprintf(&state.OutputStr, "Request timeout, please try again later.")
 	}

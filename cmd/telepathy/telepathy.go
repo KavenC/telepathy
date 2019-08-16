@@ -8,6 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/discord"
 	"gitlab.com/kavenc/telepathy/internal/pkg/fwd"
+	"gitlab.com/kavenc/telepathy/internal/pkg/info"
 	"gitlab.com/kavenc/telepathy/internal/pkg/line"
 	"gitlab.com/kavenc/telepathy/internal/pkg/slackmsg"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
@@ -25,6 +26,7 @@ func main() {
 	}
 
 	plugins := []telepathy.Plugin{
+		&info.Service{},
 		&line.Messenger{
 			Secret: os.Getenv("LINE_CHANNEL_SECRET"),
 			Token:  os.Getenv("LINE_CHANNEL_TOKEN"),

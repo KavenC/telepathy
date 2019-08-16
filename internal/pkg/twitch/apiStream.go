@@ -175,7 +175,7 @@ func (s *Service) streamChanged(request *http.Request, body []byte) int {
 		// Construct message
 		var msg strings.Builder
 		if len(streamList.Data) == 0 {
-			fmt.Fprintf(&msg, "== Twitch Stream Offline==\n- Streamer: %s (%s)",
+			fmt.Fprintf(&msg, "== Twitch Stream Offline ==\n- Streamer: %s (%s)",
 				user.DisplayName, user.Login)
 			s.streamStatus.Store(userID, false)
 		} else {

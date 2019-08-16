@@ -244,7 +244,7 @@ func (s *Service) queryStream(state *argo.State, extraArgs ...interface{}) error
 		}
 		if stream.offline {
 			fmt.Fprintf(&state.OutputStr, `== Twitch Stream ==
-- User: %s, stream offline`, userLogin)
+- %s stream offline`, userLogin)
 			return nil
 		}
 

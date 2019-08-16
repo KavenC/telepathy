@@ -52,13 +52,14 @@ To try out the demo implementation, add following bot users to your messenger/ch
 
 ## Hosting
 
-Telepathy is now staging on Heroku. The provided `Procfile` and `Gopkgtoml` make it possible to be deployed by git push. Telepathy also depending on:
-
-- Redis: Heroku's Redis addon with Free plan usually works.
+Telepathy is now staging on Heroku. The provided `Procfile` and `Gopkg.toml` make it possible to be deployed by git push. Telepathy also depending on:
 
 - MongoDB: MongoDB Atlas Free plan usaully works.
 
+- Imgur: For handling image messages.
+
 The following environment variables are necessary:
+
 |Variable Name|Comment|
 |-------------|-------|
 |DISCORD_BOT_TOKEN|Discord Bot token|
@@ -67,13 +68,12 @@ The following environment variables are necessary:
 |LINE_CHANNEL_TOKEN|LINE API token|
 |MONGODB_NAME|The database name of MongoDB|
 |MONGODB_URL|The MongoDB server url, including account and password. (e.g. `mongodb+srv://(username):(authe token)@(database id).mongodb.net/test?retryWrites=true`)|
-|REDIS_URL|The Redis server usr with login infomation|
 |SLACK_BOT_TOKEN|Slack app bot token|
 |SLACK_CLIENT_ID|Slack app client ID (needed for OAuth)|
 |SLACK_CLIENT_SECRET|Slack app client secret (needed for OAuth)|
 |SLACK_SIGNING_SECRET|Slack message sign secret. (validate Slack reqests)|
 |TWITCH_CLIENT_ID|Twitch api client ID|
 
-Note that variables for `IMGUR_*`, `MONGODB_*` and `REDIS_*` are needed for Telepathy core. 
-The others can be optional and only needed if you enabled the service/messenger. 
+Note that variables for `IMGUR_*` and `MONGODB_*` are needed for Telepathy core.
+The others can be optional and only needed if you enabled the service/messenger.
 Service and messenger suport can be disabled by removing importing and configuring lines in `cmd/telepathy/telepathy.go`

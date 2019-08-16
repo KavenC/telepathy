@@ -64,8 +64,3 @@ type PluginMsgProducer interface {
 type PluginDatabaseUser interface {
 	DBRequestChannel() <-chan DatabaseRequest
 }
-
-// PluginRedisUser defines necessary functions ifa plugin uses Redis
-type PluginRedisUser interface {
-	RedisRequestChannel() <-chan RedisRequest
-}

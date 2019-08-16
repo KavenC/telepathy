@@ -12,7 +12,6 @@ import (
 // Session defines a Telepathy server session
 type Session struct {
 	ctx       context.Context
-	redis     *redisHandle
 	db        *databaseHandler
 	webServer httpServer
 	router    *router
@@ -25,7 +24,6 @@ type Session struct {
 type SessionConfig struct {
 	Port         string // Port Number for Webhook handling server
 	RootURL      string // URL to telepathy server
-	RedisURL     string // URL to the Redis server
 	MongoURL     string // URL to the MongoDB Server
 	DatabaseName string // MongoDB database name
 }
@@ -47,12 +45,6 @@ func NewSession(config SessionConfig, plugins []Plugin) (*Session, error) {
 		return nil, err
 	}
 	err = session.webServer.init(config.RootURL, config.Port)
-	if err != nil {
-		return nil, err
-	}
-
-	// Init redis
-	session.redis, err = newRedisHandle(config.RedisURL)
 	if err != nil {
 		return nil, err
 	}
@@ -128,10 +120,6 @@ func (s *Session) initPlugin() {
 		if pdb, ok := p.(PluginDatabaseUser); ok {
 			s.db.attachRequester(id, pdb.DBRequestChannel())
 		}
-
-		if pred, ok := p.(PluginRedisUser); ok {
-			s.redis.attachRequester(id, pred.RedisRequestChannel())
-		}
 	}
 }
 
@@ -147,7 +135,6 @@ func (s *Session) Start() {
 		f()
 		wgBackend.Done()
 	}
-	go startBackend(s.redis.start)
 	go startBackend(s.db.start)
 
 	// Start plugins

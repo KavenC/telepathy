@@ -83,10 +83,13 @@ func (m *Service) allocateKeys() []string {
 		for ; r > 0; r-- {
 			key := randstr.Generate(len)
 			err := m.sessionKeys.Add(key, "", cache.DefaultExpiration)
+			logger.Warnf("allocating key: %s", key)
 			if err != nil {
-				break
+				// key exists, retry
+				continue
 			}
 			ret = append(ret, key)
+			break
 		}
 
 		if r == 0 {
@@ -98,6 +101,7 @@ func (m *Service) allocateKeys() []string {
 			return nil
 		}
 	}
+
 	return ret
 }
 
@@ -144,7 +148,7 @@ func (m *Service) initSession(ctx context.Context, session Session) (string, str
 }
 
 // Entry point to start a setup session
-func (m *Service) setupFwd(state *argo.State, session Session, extraArgs telepathy.CmdExtraArgs) {
+func (m *Service) setupFwd(state *argo.State, session Session, extraArgs telepathy.CmdExtraArgs) error {
 	args := state.Args()
 	session.FirstAlias = args[0]
 	session.SecondAlias = args[1]
@@ -154,16 +158,16 @@ func (m *Service) setupFwd(state *argo.State, session Session, extraArgs telepat
 	// allocate keys in the redis
 	// if allocated, prompt to user to start the process
 	key1, key2, err := m.initSession(extraArgs.Ctx, session)
-
 	if err != nil {
-		state.OutputStr.WriteString(err.Error())
-	} else {
-		prefix := telepathy.CommandPrefix()
-		state.OutputStr.WriteString("\nPlease follow these steps:\n")
-		state.OutputStr.WriteString("1. Make sure Telepathy is enabled in both channels\n")
-		fmt.Fprintf(&state.OutputStr, "2. Send: %s %s set %s to the 1st channel\n", prefix, funcKey, key1)
-		fmt.Fprintf(&state.OutputStr, "3. Send: %s %s set %s to the 2nd channel", prefix, funcKey, key2)
+		return err
 	}
+
+	prefix := telepathy.CommandPrefix()
+	state.OutputStr.WriteString("\nPlease follow these steps:\n")
+	state.OutputStr.WriteString("1. Make sure Telepathy is enabled in both channels\n")
+	fmt.Fprintf(&state.OutputStr, "2. Send: %s %s set %s to the 1st channel\n", prefix, funcKey, key1)
+	fmt.Fprintf(&state.OutputStr, "3. Send: %s %s set %s to the 2nd channel", prefix, funcKey, key2)
+	return nil
 }
 
 // try create fwd between from and to, and outputting messages for the results

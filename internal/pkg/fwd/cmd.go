@@ -81,8 +81,7 @@ func (m *Service) createTwoWay(state *argo.State, extras ...interface{}) error {
 	}
 
 	state.OutputStr.WriteString("Setup two-way channel forwarding (1st Channel <-> 2nd Channel)\n")
-	m.setupFwd(state, Session{Cmd: twoWay}, extraArgs)
-	return nil
+	return m.setupFwd(state, Session{Cmd: twoWay}, extraArgs)
 }
 
 func (m *Service) createOneWay(state *argo.State, extras ...interface{}) error {

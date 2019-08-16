@@ -20,7 +20,6 @@ func main() {
 	config := telepathy.SessionConfig{
 		Port:         os.Getenv("PORT"),
 		RootURL:      os.Getenv("URL"),
-		RedisURL:     os.Getenv("REDIS_URL"),
 		MongoURL:     os.Getenv("MONGODB_URL"),
 		DatabaseName: os.Getenv("MONGODB_NAME"),
 	}

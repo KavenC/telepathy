@@ -12,133 +12,184 @@ import (
 // Session defines a Telepathy server session
 type Session struct {
 	ctx       context.Context
-	Redis     *redisHandle
-	DB        *databaseHandler
-	Message   *MessageManager
-	Service   *serviceManager
-	WebServer httpServer
-	Command   *cmdManager
+	db        *databaseHandler
+	webServer httpServer
+	router    *router
+	plugins   map[string]Plugin
+	done      chan interface{}
+	logger    *logrus.Entry
 }
 
 // SessionConfig defines the configurations of a Telepathy session
 type SessionConfig struct {
-	// Infrastructure configs
 	Port         string // Port Number for Webhook handling server
 	RootURL      string // URL to telepathy server
-	RedisURL     string // URL to the Redis server
 	MongoURL     string // URL to the MongoDB Server
 	DatabaseName string // MongoDB database name
-	// Plugin Config Tables
-	MessengerConfigTable map[string]PluginConfig
-	ServiceConfigTable   map[string]PluginConfig
 }
 
 // NewSession creates a new Telepathy session
-func NewSession(config SessionConfig) (*Session, error) {
+func NewSession(config SessionConfig, plugins []Plugin) (*Session, error) {
 	session := Session{
-		WebServer: httpServer{},
+		webServer: httpServer{},
+		plugins:   make(map[string]Plugin),
+		logger:    logrus.WithField("module", "session"),
 	}
+
+	session.logger.Info("initializing")
+
 	var err error
-	session.WebServer.uRL, err = url.Parse(config.RootURL)
+	// initialize backend services
+	// Init webserver
 	if err != nil {
 		return nil, err
 	}
-
-	// Init redis
-	session.Redis, err = newRedisHandle(config.RedisURL)
+	err = session.webServer.init(config.RootURL, config.Port)
 	if err != nil {
 		return nil, err
 	}
 
 	// Init database
-	session.DB, err = newDatabaseHandler(config.MongoURL, config.DatabaseName)
+	session.db, err = newDatabaseHandler(config.MongoURL, config.DatabaseName)
 	if err != nil {
 		return nil, err
 	}
 
-	// Init command manager
-	session.Command = newCmdManager(&session)
+	// Init Router
+	session.router = newRouter()
 
-	// Init messenger
-	session.Message = newMessageManager(&session, config.MessengerConfigTable)
-
-	// Init service
-	// Internal service
-	RegisterService(channelServiceID, newChannelService)
-	session.Service = newServiceManager(&session, config.ServiceConfigTable)
-
-	// Finalize command manager
-	session.Command.rootCmd.Finalize()
-
-	// Init httpServer
-	err = session.WebServer.init(config.Port)
-	if err != nil {
-		return nil, err
+	// install plugins
+	for _, p := range plugins {
+		if _, ok := session.plugins[p.ID()]; ok {
+			session.logger.Panicf("duplicated plugin id: %s", p.ID())
+		}
+		session.plugins[p.ID()] = p
 	}
+
+	// install internal plugins
+	session.plugins["telepathy.channel"] = &channelService{}
+
+	session.initPlugin()
+
 	return &session, nil
+}
+
+func (s *Session) initPlugin() {
+	// For each plugin go through all implemented interfaces and
+	// fuse them with framework modules
+	logger := s.logger.WithField("phase", "init-plugin")
+	for id, p := range s.plugins {
+		logger.Infof("init plugin: %s", id)
+		// See plugin.go for interface definitions
+		// first, we check if the id matches
+		if id != p.ID() {
+			logger.Panicf("plugin id mismatch, map id: %s plugin id: %s", id, p.ID())
+		}
+		p.SetLogger(logrus.WithField("plugin", id))
+
+		// Go through all interface implementations
+		if pmsg, ok := p.(PluginMessenger); ok {
+			s.router.attachReceiver(id, pmsg.InMsgChannel())
+			pmsg.AttachOutMsgChannel(s.router.attachTransmitter(id))
+		}
+
+		if pcmd, ok := p.(PluginCommandHandler); ok {
+			s.router.cmd.attachCommandInterface(pcmd.Command(s.router.cmd.done))
+		}
+
+		if pwebh, ok := p.(PluginWebhookHandler); ok {
+			urlMap := make(map[string]*url.URL)
+			for key, handle := range pwebh.Webhook() {
+				url, err := s.webServer.registerWebhook(key, handle)
+				if err != nil {
+					logger.Panicf(err.Error())
+				}
+				urlMap[key] = url
+			}
+			pwebh.SetWebhookURL(urlMap)
+		}
+
+		if pcon, ok := p.(PluginMsgConsumer); ok {
+			pcon.AttachInMsgChannel(s.router.attachConsumer(id))
+		}
+
+		if ppro, ok := p.(PluginMsgProducer); ok {
+			s.router.attachProducer(id, ppro.OutMsgChannel())
+		}
+
+		if pdb, ok := p.(PluginDatabaseUser); ok {
+			s.db.attachRequester(id, pdb.DBRequestChannel())
+		}
+	}
 }
 
 // Start starts a Telepathy session
 // The function always returns an error when the seesion is terminated
-func (s *Session) Start(ctx context.Context) {
-	logrus.Info("session start")
-
-	var wg sync.WaitGroup
+func (s *Session) Start() {
+	s.done = make(chan interface{})
 	// Start backend services
-	logrus.Info("starting backend services")
-	wg.Add(2)
-	// Start redis
+	s.logger.Info("starting backend services")
+	wgBackend := sync.WaitGroup{}
+	startBackend := func(f func()) {
+		wgBackend.Add(1)
+		f()
+		wgBackend.Done()
+	}
+	go startBackend(s.db.start)
+
+	// Start plugins
+	wgPlugin := sync.WaitGroup{}
+	startPlugin := func(f func()) {
+		wgPlugin.Add(1)
+		f()
+		wgPlugin.Done()
+	}
+	for _, plugin := range s.plugins {
+		go startPlugin(plugin.Start)
+	}
+
+	// Start router
 	go func() {
-		s.Redis.start(ctx)
-		wg.Done()
+		wgBackend.Add(1)
+		s.router.start()
+		wgBackend.Done()
 	}()
 
-	// Start database
-	go func() {
-		s.DB.start(ctx)
-		wg.Done()
-	}()
-	wg.Wait()
+	// Start Webhook handling server
+	s.logger.Info("starting web server")
+	s.webServer.finalize()
+	go s.webServer.ListenAndServe()
 
-	// Start messenger handlers
-	logrus.Info("starting messengers")
-	wg.Add(len(s.Message.messengers))
-	for _, messenger := range s.Message.messengers {
-		go func(msg plugin) {
-			msg.Start(ctx)
-			wg.Done()
-		}(messenger)
-	}
-	wg.Wait()
+	// Wait here until we received termination signal
+	<-s.done
+	s.logger.Info("terminating")
 
-	// Start services
-	logrus.Info("starting services")
-	wg.Add(len(s.Service.services))
-	for _, service := range s.Service.services {
-		go func(svc plugin) {
-			svc.Start(ctx)
-			wg.Done()
-		}(service)
-	}
-	wg.Wait()
-
-	//Start Webhook handling server
-	logrus.WithField("module", "session").Info("starting web server")
-	s.WebServer.finalize()
-	go s.WebServer.ListenAndServe()
-
-	// Wait here until the session is Done
-	<-ctx.Done()
-	logrus.WithField("module", "session").Info("stopping")
-
+	// Termination process
 	// Shutdown Http server
 	timeout, stop := context.WithTimeout(context.Background(), 5*time.Second)
-	err := s.WebServer.Shutdown(timeout)
+	err := s.webServer.Shutdown(timeout)
 	stop()
 	if err != nil {
-		logrus.Errorf("failed to shutdown httpserver: %s", err.Error())
-	} else {
-		logrus.Info("httpserver shutdown")
+		s.logger.Errorf("failed to shutdown httpserver: %s", err.Error())
+		return
 	}
-	logrus.Info("session closed")
+	s.logger.Info("httpserver shutdown")
+
+	// Terminate plugins
+	for _, plugin := range s.plugins {
+		plugin.Stop()
+	}
+	wgPlugin.Wait()
+	s.logger.Info("all plugins terminated")
+
+	// Wait for backend service
+	wgBackend.Wait()
+	s.logger.Info("all backend services terminated")
+
+	s.logger.Info("session closed")
+}
+
+// Stop triggers termination of telepathy session
+func (s *Session) Stop() {
+	close(s.done)
 }

@@ -2,8 +2,9 @@
 package info
 
 import (
-	"context"
 	"fmt"
+
+	"github.com/sirupsen/logrus"
 
 	"gitlab.com/kavenc/argo"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
@@ -15,26 +16,33 @@ const (
 
 var version = "dev"
 
-type service struct {
-	telepathy.ServicePlugin
+// Service implements telepathy plugin interfaces
+type Service struct {
+	telepathy.Plugin
+	telepathy.PluginCommandHandler
+	logger *logrus.Entry
 }
 
-func init() {
-	telepathy.RegisterService(id, ctor)
+// ID implements telepathy.Plugin
+func (s Service) ID() string {
+	return "INFO"
 }
 
-func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
-	svc := &service{}
-	return svc, nil
+// SetLogger implements telepathy.Plugin
+func (s *Service) SetLogger(logger *logrus.Entry) {
+	s.logger = logger
 }
 
-func (s *service) Start(ctx context.Context) {}
+// Start implements telepathy.Plugin
+func (s Service) Start() {}
 
-func (s *service) ID() string {
-	return id
+// Stop implements telepathy.Plugin
+func (s Service) Stop() {
+	s.logger.Info("terminated")
 }
 
-func (s *service) CommandInterface() *argo.Action {
+// Command implements telepathy.PluginCommandHandler
+func (s Service) Command(_ <-chan interface{}) *argo.Action {
 	cmd := &argo.Action{
 		Trigger:    id,
 		ShortDescr: "Telepathy infomation",

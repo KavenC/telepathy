@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/patrickmn/go-cache"
+
 	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/mongodb/mongo-go-driver/mongo/options"
@@ -12,65 +14,134 @@ import (
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
-const dbTableName = "fwdtable"
+const (
+	id          = "FWD"
+	funcKey     = "fwd"
+	dbTableName = "fwdtable"
+	outMsgLen   = 20
+	dbReqLen    = 1
+	redisReqLen = 1
+)
 
-type forwardingManager struct {
-	telepathy.ServicePlugin
-	session *telepathy.Session
-	table   table
-	context context.Context
-	logger  *logrus.Entry
+// Service defines the plugin structure
+type Service struct {
+	telepathy.Plugin
+	telepathy.PluginCommandHandler
+	telepathy.PluginMsgConsumer
+	telepathy.PluginMsgProducer
+	telepathy.PluginDatabaseUser
+
+	inMsg   <-chan telepathy.InboundMessage
+	outMsg  chan telepathy.OutboundMessage
+	dbReq   chan telepathy.DatabaseRequest
+	cmdDone <-chan interface{}
+
+	sessionKeys *cache.Cache
+	table       *table
+	logger      *logrus.Entry
 }
 
-func init() {
-	telepathy.RegisterService(funcKey, ctor)
+// ID implements telepathy.Plugin
+func (m *Service) ID() string {
+	return id
 }
 
-func ctor(param *telepathy.ServiceCtorParam) (telepathy.Service, error) {
-	manager := &forwardingManager{
-		session: param.Session,
-		table:   table{logger: param.Logger.WithField("component", "table")},
-		logger:  param.Logger,
-	}
-	manager.session.Message.RegisterMessageHandler(manager.msgHandler)
-	return manager, nil
+// SetLogger implements telepathy.Plugin
+func (m *Service) SetLogger(logger *logrus.Entry) {
+	m.logger = logger
 }
 
-func (m *forwardingManager) Start(ctx context.Context) {
-	m.context = ctx
-	// Load forwarding table from DB
+// Start implements telepathy.Plugin
+func (m *Service) Start() {
+	m.sessionKeys = cache.New(keyExpireTime, keyExpireTime)
+	m.table = newTable()
+
+	// Starting sequence
+	// 1. Load fwd table from DB
+	// 2. Start table handler
+	// 3. start receiving/forwarding messages
 	err := m.loadFromDB()
 	if err != nil {
-		m.logger.Errorf("Table LoadDB failed: %s", err.Error())
+		m.logger.Errorf("table LoadDB failed: %s", err.Error())
 	}
-	m.table.start(m.context)
+
+	tableDone := make(chan interface{})
+	go func() {
+		m.table.start()
+		close(tableDone)
+	}()
+
+	msgDone := make(chan interface{})
+	go func() {
+		m.msgHandler()
+		close(msgDone)
+	}()
+
+	m.logger.Info("started")
+
+	// Terminating sequence
+	// 1. Wait until msgHandler and command parser ends
+	// 2. close redis & close outMsg
+	// 3. Store fwd table to DB
+	// 4. Stop table handler
+	// 5. close db
+	<-msgDone
+	<-m.cmdDone
+	close(m.outMsg)
+	<-m.writeToDB()
+	m.table.stop()
+	<-tableDone
+	close(m.dbReq)
+	m.logger.Info("terminated")
 }
 
-func (m *forwardingManager) ID() string {
-	return funcKey
+// Stop implements telepathy.Plugin
+func (m *Service) Stop() {
+	// No active stop needed
 }
 
-func (m *forwardingManager) msgHandler(ctx context.Context, message telepathy.InboundMessage) {
-	toChList := m.table.getTo(message.FromChannel)
-	if toChList != nil {
-		for toCh, alias := range toChList {
-			outMsg := &telepathy.OutboundMessage{
-				TargetID: toCh.ChannelID,
-				AsName:   fmt.Sprintf("%s | %s", alias.SrcAlias, message.SourceProfile.DisplayName),
-				Text:     message.Text,
-				Image:    message.Image,
+// AttachInMsgChannel implements telepathy.PluginMsgConsumer
+func (m *Service) AttachInMsgChannel(ch <-chan telepathy.InboundMessage) {
+	m.inMsg = ch
+}
+
+//OutMsgChannel implements telepathy.PluginMsgProducer
+func (m *Service) OutMsgChannel() <-chan telepathy.OutboundMessage {
+	if m.outMsg == nil {
+		m.outMsg = make(chan telepathy.OutboundMessage, outMsgLen)
+	}
+	return m.outMsg
+}
+
+// DBRequestChannel implements telepathy.PluginDatabaseUser
+func (m *Service) DBRequestChannel() <-chan telepathy.DatabaseRequest {
+	if m.dbReq == nil {
+		m.dbReq = make(chan telepathy.DatabaseRequest, dbReqLen)
+	}
+	return m.dbReq
+}
+
+func (m *Service) msgHandler() {
+	for message := range m.inMsg {
+		toChList := m.table.getTo(message.FromChannel)
+		if toChList != nil {
+			for toCh, alias := range toChList {
+				outMsg := telepathy.OutboundMessage{
+					ToChannel: toCh,
+					AsName:    fmt.Sprintf("%s | %s", alias.SrcAlias, message.SourceProfile.DisplayName),
+					Text:      message.Text,
+					Image:     message.Image,
+				}
+				m.outMsg <- outMsg
 			}
-
-			msgr, _ := m.session.Message.Messenger(toCh.MessengerID)
-			msgr.Send(outMsg)
 		}
 	}
 }
 
-func (m *forwardingManager) writeToDB() chan interface{} {
+func (m *Service) writeToDB() chan interface{} {
 	retCh := make(chan interface{}, 1)
 	bsonChan := m.table.bson()
-	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
+	m.dbReq <- telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			tableBSON := bson.M{"ID": dbTableName, "Table": *(<-bsonChan)}
 			collection := db.Collection(funcKey)
@@ -82,13 +153,13 @@ func (m *forwardingManager) writeToDB() chan interface{} {
 			return result
 		},
 		Return: retCh,
-	})
+	}
 	return retCh
 }
 
-func (m *forwardingManager) loadFromDB() error {
+func (m *Service) loadFromDB() error {
 	retCh := make(chan interface{}, 1)
-	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
+	m.dbReq <- telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			collection := db.Collection(funcKey)
 			result := collection.FindOne(ctx, map[string]string{"ID": dbTableName})
@@ -99,7 +170,7 @@ func (m *forwardingManager) loadFromDB() error {
 			return raw.Lookup("Table")
 		},
 		Return: retCh,
-	})
+	}
 
 	// Wait until DB operation is done
 	result := <-retCh

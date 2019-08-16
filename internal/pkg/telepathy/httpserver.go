@@ -34,13 +34,7 @@ type httpServer struct {
 	webhookList map[string]HTTPHandler
 }
 
-// RegisterWebhook is used to register a http callback, like webhooks
-// The pattern can only be in this regular expression format: ^[A-Za-z]+(-[A-Za-z0-9]+){0,3}$, otherwise
-// the registeration will be ignored.
-// If the pattern is already registered, registeration will be ignored.
-// Webhooks are always registered at (host)/webhook/<patter>
-// Returns the Webhook callback URL if no error
-func (server *httpServer) RegisterWebhook(pattern string, handler HTTPHandler) (*url.URL, error) {
+func (server *httpServer) registerWebhook(pattern string, handler HTTPHandler) (*url.URL, error) {
 	logger := logrus.WithField("module", "httpserv").WithField("webhook", pattern)
 
 	if !validHook.MatchString(pattern) {
@@ -72,11 +66,12 @@ func (server *httpServer) serveMux() *http.ServeMux {
 	return &mux
 }
 
-func (server *httpServer) init(port string) error {
-	logger := logrus.WithFields(logrus.Fields{
-		"module": "httpServer",
-	})
-	logger.Infof("httpServer port: %s", port)
+func (server *httpServer) init(urlstr string, port string) error {
+	var err error
+	server.uRL, err = url.Parse(urlstr)
+	if err != nil {
+		return err
+	}
 	server.Addr = ":" + port
 	return nil
 }

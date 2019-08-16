@@ -1,4 +1,4 @@
-package telepathy
+package imgur
 
 import (
 	"bytes"

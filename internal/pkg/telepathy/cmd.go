@@ -2,104 +2,130 @@ package telepathy
 
 import (
 	"context"
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/argo"
 )
 
+const (
+	cmdPrefix    = "teru"
+	cmdWorkerNum = 10
+	cmdMsgOutLen = 5
+	cmdTimeout   = time.Second * 2
+)
+
+// CmdExtraArgs carries extra info for command handlers
+type CmdExtraArgs struct {
+	Ctx     context.Context
+	Message InboundMessage
+}
+
+type commandMessage struct {
+	msg  InboundMessage
+	args []string
+}
+
+type commandHandler struct {
+	cmd     *argo.Action
+	channel chan commandMessage
+}
+
 type cmdManager struct {
-	session *Session
-	rootCmd argo.Action
+	cmdRoot argo.Action
+	cmdIn   <-chan InboundMessage
+	msgOut  chan OutboundMessage
+	done    chan interface{}
 	logger  *logrus.Entry
 }
 
-// CmdExtraArgs defines the extra arguments passed to Command.Run callbacks
-// All Command.Run callbacks must call ParseExtraCmdArgs to get these data
-type CmdExtraArgs struct {
-	Ctx     context.Context
-	Message *InboundMessage
-}
-
-// CmdExistsError indicates registering an already registered command
-type CmdExistsError struct {
-	Cmd string
-}
-
-// CommandPrefix is the trigger word for the Telepathy command message
-const CommandPrefix = "teru"
-
 var regexCmdSplitter = regexp.MustCompile(" +")
 
-func (e CmdExistsError) Error() string {
-	return e.Cmd + " already exists."
-}
-
-func newCmdManager(s *Session) *cmdManager {
+func newCmdManager(inCh <-chan InboundMessage) *cmdManager {
 	return &cmdManager{
-		session: s,
-		rootCmd: argo.Action{Trigger: CommandPrefix},
-		logger:  logrus.WithField("module", "cmdManager"),
+		cmdRoot: argo.Action{
+			Trigger: cmdPrefix,
+		},
+		cmdIn:  inCh,
+		msgOut: make(chan OutboundMessage, cmdMsgOutLen),
+		done:   make(chan interface{}),
+		logger: logrus.WithField("module", "cmdManager"),
 	}
 }
 
-// RegisterCommand register a subcommand in telepathy command tree
-func (m *cmdManager) RegisterCommand(cmd *argo.Action) error {
-	err := m.rootCmd.AddSubAction(*cmd)
-	if err != nil {
-		_, ok := err.(argo.DuplicatedSubActionError)
-		if ok {
-			m.logger.Errorf("command: %s has already been registered", cmd.Trigger)
-			return CmdExistsError{Cmd: cmd.Trigger}
-		}
-		m.logger.Errorf("RegisterCommand: %s", err.Error())
-		return err
-	}
-	m.logger.Infof("registered command: %s", cmd.Trigger)
-	return nil
+func (m *cmdManager) attachCommandInterface(cmd *argo.Action) {
+	m.cmdRoot.AddSubAction(*cmd)
+	m.logger.Infof("attached command: %s", cmd.Trigger)
 }
 
-func (m *cmdManager) handleCmdMsg(ctx context.Context, message *InboundMessage) {
-	// Got a command message
-	// Parse it with command interface
-	args := regexCmdSplitter.Split(message.Text, -1)
+func (m *cmdManager) isCmdMsg(text string) bool {
+	return strings.HasPrefix(text, cmdPrefix+" ")
+}
 
-	// Execute command
-	extraArgs := CmdExtraArgs{
-		Ctx:     ctx,
-		Message: message,
+func (m *cmdManager) worker(id int) {
+	logger := m.logger.WithField("worker", strconv.Itoa(id))
+
+	// worker function for handling command messages
+	for msg := range m.cmdIn {
+		args := regexCmdSplitter.Split(msg.Text, -1)
+		timeout, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		done := make(chan interface{})
+
+		go func() {
+			state := argo.State{}
+			err := m.cmdRoot.Parse(&state, args, CmdExtraArgs{
+				Message: msg,
+				Ctx:     timeout,
+			})
+			if err != nil {
+				if _, ok := err.(argo.Err); ok {
+					fmt.Fprintf(&state.OutputStr, "Invalid command: %s", err.Error())
+				} else {
+					logger.Errorf("command parsing failed: %s", err.Error())
+					logger.Errorf("msg: %s", msg.Text)
+					logger.Errorf("partial OutputStr: ")
+					logger.Errorf(state.OutputStr.String())
+					state.OutputStr.Reset()
+					state.OutputStr.WriteString("Internal Error! Please try again later.")
+				}
+			}
+			if state.OutputStr.Len() != 0 {
+				msg := msg.Reply()
+				msg.Text = state.OutputStr.String()
+				m.msgOut <- msg
+			}
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-timeout.Done():
+			logger.Warnf("timeout/cacnelled: %s", args)
+		}
+		cancel()
+	}
+}
+
+func (m *cmdManager) start() {
+	m.cmdRoot.Finalize()
+	wg := sync.WaitGroup{}
+	wg.Add(cmdWorkerNum)
+	for id := 0; id < cmdWorkerNum; id++ {
+		go func(id int) {
+			m.worker(id)
+			wg.Done()
+		}(id)
 	}
 
-	state := &argo.State{}
-	err := m.rootCmd.Parse(state, args, extraArgs)
-	if err != nil {
-		var replyText string
-		if fewCmdErr, ok := err.(argo.TooFewArgsError); ok {
-			replyText = fewCmdErr.Victim.Help()
-		} else {
-			replyText = "Oops somehow I failed to complete the action, please try again later"
-			m.logger.Errorf("handleCmdMsg: %s", err.Error())
-		}
-		replyMsg := &OutboundMessage{
-			TargetID: message.FromChannel.ChannelID,
-			Text:     replyText,
-		}
-		msg, _ := m.session.Message.Messenger(message.FromChannel.MessengerID)
-		msg.Send(replyMsg)
-		return
-	}
-
-	// If there is stirng output, forward it back to messenger
-	reply := state.OutputStr.String()
-	if len(reply) > 0 {
-		replyMsg := &OutboundMessage{
-			TargetID: message.FromChannel.ChannelID,
-			Text:     reply,
-		}
-		msg, _ := m.session.Message.Messenger(message.FromChannel.MessengerID)
-		msg.Send(replyMsg)
-	}
+	m.logger.Infof("started worker: %d", cmdWorkerNum)
+	wg.Wait()
+	close(m.done)
+	close(m.msgOut)
+	m.logger.Info("termianted")
 }
 
 // CommandEnsureDM checks if command is from direct message
@@ -111,6 +137,7 @@ func CommandEnsureDM(state *argo.State, extraArgs CmdExtraArgs) bool {
 	return true
 }
 
-func isCmdMsg(text string) bool {
-	return strings.HasPrefix(text, CommandPrefix+" ")
+// CommandPrefix returns command triggering keyword
+func CommandPrefix() string {
+	return cmdPrefix
 }

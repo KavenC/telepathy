@@ -2,6 +2,7 @@ package telepathy
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -82,12 +83,16 @@ func (m *cmdManager) worker(id int) {
 				Ctx:     timeout,
 			})
 			if err != nil {
-				logger.Errorf("command parsing failed: %s", err.Error())
-				logger.Errorf("msg: %s", msg.Text)
-				logger.Errorf("partial OutputStr: ")
-				logger.Errorf(state.OutputStr.String())
-				state.OutputStr.Reset()
-				state.OutputStr.WriteString("Internal Error! Please try again later.")
+				if _, ok := err.(argo.Err); ok {
+					fmt.Fprintf(&state.OutputStr, "Invalid command: %s", err.Error())
+				} else {
+					logger.Errorf("command parsing failed: %s", err.Error())
+					logger.Errorf("msg: %s", msg.Text)
+					logger.Errorf("partial OutputStr: ")
+					logger.Errorf(state.OutputStr.String())
+					state.OutputStr.Reset()
+					state.OutputStr.WriteString("Internal Error! Please try again later.")
+				}
 			}
 			if state.OutputStr.Len() != 0 {
 				msg := msg.Reply()

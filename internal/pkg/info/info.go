@@ -34,7 +34,9 @@ func (s *Service) SetLogger(logger *logrus.Entry) {
 }
 
 // Start implements telepathy.Plugin
-func (s Service) Start() {}
+func (s Service) Start() {
+	s.logger.Info("started")
+}
 
 // Stop implements telepathy.Plugin
 func (s Service) Stop() {
@@ -56,6 +58,6 @@ func show(state *argo.State, extras ...interface{}) error {
 	fmt.Fprintf(&state.OutputStr,
 		`Telepathy: Universal Messenger Botting Platform
 Version: alpha (%s)
-Source: https://gitlab.com/kavenc/telepathy`, version)
+Source: https://gitlab.com/kavenc/telepathy`, version[:8])
 	return nil
 }

@@ -10,22 +10,6 @@
   version = "v0.19.0"
 
 [[projects]]
-  digest = "1:6bafc5f7351645dce4cd04ec4db791bdb421d43da13c3fcef8b90cca01ba7621"
-  name = "github.com/go-redis/redis"
-  packages = [
-    ".",
-    "internal",
-    "internal/consistenthash",
-    "internal/hashtag",
-    "internal/pool",
-    "internal/proto",
-    "internal/util",
-  ]
-  pruneopts = "UT"
-  revision = "c5c4ad6a4cae24f3867af1a0513709fc944a87f3"
-  version = "v6.15.4"
-
-[[projects]]
   digest = "1:586ea76dbd0374d6fb649a91d70d652b7fe0ccffb8910a77468e7702e7901f3d"
   name = "github.com/go-stack/stack"
   packages = ["."]
@@ -159,12 +143,12 @@
   revision = "73f8eece6fdcd902c185bf651de50f3828bed5ed"
 
 [[projects]]
-  digest = "1:ca2aab36771c02212bb0064511c7ee7fc60ec15756fca5e66cd84b49a60b4352"
+  branch = "master"
+  digest = "1:55a562e6bd375706fa4bf2716c1bcf14ab9bff383a17b34332a1dda3a2ca70b0"
   name = "gitlab.com/kavenc/argo"
   packages = ["."]
   pruneopts = "UT"
-  revision = "c4b380ec79b732ba4a99abcd7d1bef49609a407c"
-  version = "v0.0.1"
+  revision = "7675ff0ae3a40ee830a9c244d02027b5630f526e"
 
 [[projects]]
   branch = "master"
@@ -219,7 +203,6 @@
   analyzer-version = 1
   input-imports = [
     "github.com/bwmarrin/discordgo",
-    "github.com/go-redis/redis",
     "github.com/line/line-bot-sdk-go/linebot",
     "github.com/mongodb/mongo-go-driver/bson",
     "github.com/mongodb/mongo-go-driver/mongo",

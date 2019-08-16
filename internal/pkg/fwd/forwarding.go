@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/patrickmn/go-cache"
+
 	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/mongodb/mongo-go-driver/mongo/options"
@@ -28,16 +30,15 @@ type Service struct {
 	telepathy.PluginMsgConsumer
 	telepathy.PluginMsgProducer
 	telepathy.PluginDatabaseUser
-	telepathy.PluginRedisUser
 
-	inMsg    <-chan telepathy.InboundMessage
-	outMsg   chan telepathy.OutboundMessage
-	dbReq    chan telepathy.DatabaseRequest
-	redisReq chan telepathy.RedisRequest
-	cmdDone  <-chan interface{}
+	inMsg   <-chan telepathy.InboundMessage
+	outMsg  chan telepathy.OutboundMessage
+	dbReq   chan telepathy.DatabaseRequest
+	cmdDone <-chan interface{}
 
-	table  *table
-	logger *logrus.Entry
+	sessionKeys *cache.Cache
+	table       *table
+	logger      *logrus.Entry
 }
 
 // ID implements telepathy.Plugin
@@ -52,6 +53,7 @@ func (m *Service) SetLogger(logger *logrus.Entry) {
 
 // Start implements telepathy.Plugin
 func (m *Service) Start() {
+	m.sessionKeys = cache.New(keyExpireTime, keyExpireTime)
 	m.table = newTable()
 
 	// Starting sequence
@@ -85,7 +87,6 @@ func (m *Service) Start() {
 	// 5. close db
 	<-msgDone
 	<-m.cmdDone
-	close(m.redisReq)
 	close(m.outMsg)
 	<-m.writeToDB()
 	m.table.stop()
@@ -118,14 +119,6 @@ func (m *Service) DBRequestChannel() <-chan telepathy.DatabaseRequest {
 		m.dbReq = make(chan telepathy.DatabaseRequest, dbReqLen)
 	}
 	return m.dbReq
-}
-
-// RedisRequestChannel implements telepathy.PluginRedisUser
-func (m *Service) RedisRequestChannel() <-chan telepathy.RedisRequest {
-	if m.redisReq == nil {
-		m.redisReq = make(chan telepathy.RedisRequest, redisReqLen)
-	}
-	return m.redisReq
 }
 
 func (m *Service) msgHandler() {

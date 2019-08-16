@@ -81,8 +81,7 @@ func (m *Service) createTwoWay(state *argo.State, extras ...interface{}) error {
 	}
 
 	state.OutputStr.WriteString("Setup two-way channel forwarding (1st Channel <-> 2nd Channel)\n")
-	m.setupFwd(state, Session{Cmd: twoWay}, extraArgs)
-	return nil
+	return m.setupFwd(state, Session{Cmd: twoWay}, extraArgs)
 }
 
 func (m *Service) createOneWay(state *argo.State, extras ...interface{}) error {
@@ -141,38 +140,11 @@ func (m *Service) set(state *argo.State, extras ...interface{}) error {
 	args := state.Args()
 	key := args[0]
 
-	// Set key in redis
-	redisRet := make(chan interface{})
-	m.redisReq <- telepathy.RedisRequest{
-		Action: m.setKeyProcess(key, extraArgs.Message.FromChannel),
-		Return: redisRet,
+	reply, err := m.setKeyProcess(key, extraArgs.Message.FromChannel)
+	if err != nil {
+		return err
 	}
-
-	// Wait for reply
-	select {
-	case <-extraArgs.Ctx.Done():
-		m.logger.Warn("Terminated")
-		state.OutputStr.WriteString("Internal error, please try again later.")
-	case reply := <-redisRet:
-		replyStr, ok := reply.(string)
-		if ok && replyStr != "" {
-			state.OutputStr.WriteString(replyStr)
-			break
-		}
-
-		setError, ok := reply.(publicError)
-		if ok {
-			state.OutputStr.WriteString(setError.Error())
-			break
-		}
-
-		setInternalErr, ok := reply.(internalError)
-		if ok {
-			m.logger.WithField("phase", "set-key").Error(setInternalErr.Error())
-			state.OutputStr.WriteString("Internal error, please try again later.")
-		}
-	}
-
+	state.OutputStr.WriteString(reply)
 	return nil
 }
 

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/go-redis/redis"
-	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/argo"
+	"gitlab.com/kavenc/telepathy/internal/pkg/randstr"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
@@ -44,6 +44,29 @@ type Index struct {
 	Index      int
 }
 
+type publicError struct {
+	msg string
+}
+
+type internalError struct {
+	msg string
+}
+
+type terminatedError struct {
+}
+
+func (e publicError) Error() string {
+	return e.msg
+}
+
+func (e internalError) Error() string {
+	return e.msg
+}
+
+func (e terminatedError) Error() string {
+	return "terminated"
+}
+
 // allocate randstr in redis for fwd setup session
 // return a struct of allocated strings and/or error
 func allocateKeys(redis *redis.Client) interface{} {
@@ -61,7 +84,7 @@ func allocateKeys(redis *redis.Client) interface{} {
 	for i := 0; i < count; i++ {
 		r := retry
 		for ; r > 0; r-- {
-			key := telepathy.RandStr(len)
+			key := randstr.Generate(len)
 			var ok bool
 			ok, ret.err = redis.SetNX(key, "", redisExpireTime).Result()
 			if ret.err != nil {
@@ -74,8 +97,8 @@ func allocateKeys(redis *redis.Client) interface{} {
 		}
 
 		if r == 0 {
-			ret.err = PublicError{
-				Msg: "System busy, please try again later",
+			ret.err = publicError{
+				msg: "System busy, please try again later",
 			}
 			// Clean up allocated keys
 			redis.Del(ret.keys[:i]...)
@@ -86,8 +109,8 @@ func allocateKeys(redis *redis.Client) interface{} {
 }
 
 // Setup redis entries for the fwd setup session
-func (m *forwardingManager) initSession(ctx context.Context, session Session) (string, string, error) {
-	logger := logger.WithField("phase", "initSession")
+func (m *Service) initSession(ctx context.Context, session Session) (string, string, error) {
+	logger := m.logger.WithField("phase", "initSession")
 
 	// Push redis request to allocate 3 keys
 	// the keys are used for:
@@ -95,16 +118,16 @@ func (m *forwardingManager) initSession(ctx context.Context, session Session) (s
 	// 2. Identify 1st channel
 	// 3. Identify 2nd channel
 	redisRetChannel := make(chan interface{})
-	m.session.Redis.PushRequest(&telepathy.RedisRequest{
+	m.redisReq <- telepathy.RedisRequest{
 		Action: allocateKeys,
 		Return: redisRetChannel,
-	})
+	}
 
 	// Initialize Session, FirstChannel, SecondChannel structures
 	sessionStr, err := json.Marshal(session)
 	if err != nil {
 		logger.WithField("item", "session").Error("JSON Marshal Failed: " + err.Error())
-		return "", "", InternalError{Msg: err.Error()}
+		return "", "", internalError{msg: err.Error()}
 	}
 	first := Index{Index: firstCh}
 	second := Index{Index: secondCh}
@@ -113,8 +136,8 @@ func (m *forwardingManager) initSession(ctx context.Context, session Session) (s
 	var tempRet interface{}
 	select {
 	case <-ctx.Done():
-		logger.Warn("Context terminated")
-		return "", "", TerminatedError{}
+		logger.Warn("terminated")
+		return "", "", terminatedError{}
 	case tempRet = <-redisRetChannel:
 		// Fall through
 	}
@@ -125,7 +148,7 @@ func (m *forwardingManager) initSession(ctx context.Context, session Session) (s
 	})
 
 	if redisRet.err != nil {
-		logger.Error("Failed to allocate keys: " + redisRet.err.Error())
+		logger.Error("failed to allocate keys: " + redisRet.err.Error())
 		return "", "", redisRet.err
 	}
 
@@ -143,9 +166,9 @@ func (m *forwardingManager) initSession(ctx context.Context, session Session) (s
 	// 2. firstChID -> {sessionID, firstChMark}
 	// 3. secondChID -> {sessionID, secondChMark}
 	redisSetRet := make(chan interface{})
-	m.session.Redis.PushRequest(&telepathy.RedisRequest{
+	m.redisReq <- telepathy.RedisRequest{
 		Action: func(redis *redis.Client) interface{} {
-			internalErr := InternalError{Msg: "Redis key lost"}
+			internalErr := internalError{msg: "redis key lost"}
 			ok, err := redis.SetXX(sessionID, sessionStr, redisExpireTime).Result()
 			if err != nil {
 				return err
@@ -167,16 +190,16 @@ func (m *forwardingManager) initSession(ctx context.Context, session Session) (s
 			return nil
 		},
 		Return: redisSetRet,
-	})
+	}
 
 	select {
 	case <-ctx.Done():
-		logger.Warn("Context terminated")
-		return "", "", TerminatedError{}
+		logger.Warn("terminated")
+		return "", "", terminatedError{}
 	case setRet := <-redisSetRet:
 		err, _ := setRet.(error)
 		if err != nil {
-			logger.Error("Redis set key failed: " + err.Error())
+			logger.Error("redis set key failed: " + err.Error())
 			return "", "", err
 		}
 	}
@@ -185,7 +208,7 @@ func (m *forwardingManager) initSession(ctx context.Context, session Session) (s
 }
 
 // Entry point to start a setup session
-func (m *forwardingManager) setupFwd(state *argo.State, session Session, extraArgs telepathy.CmdExtraArgs) {
+func (m *Service) setupFwd(state *argo.State, session Session, extraArgs telepathy.CmdExtraArgs) {
 	args := state.Args()
 	session.FirstAlias = args[0]
 	session.SecondAlias = args[1]
@@ -199,7 +222,7 @@ func (m *forwardingManager) setupFwd(state *argo.State, session Session, extraAr
 	if err != nil {
 		state.OutputStr.WriteString(err.Error())
 	} else {
-		prefix := telepathy.CommandPrefix
+		prefix := telepathy.CommandPrefix()
 		state.OutputStr.WriteString("\nPlease follow these steps:\n")
 		state.OutputStr.WriteString("1. Make sure Telepathy is enabled in both channels\n")
 		fmt.Fprintf(&state.OutputStr, "2. Send: %s %s set %s to the 1st channel\n", prefix, funcKey, key1)
@@ -208,7 +231,7 @@ func (m *forwardingManager) setupFwd(state *argo.State, session Session, extraAr
 }
 
 // try create fwd between from and to, and outputting messages for the results
-func (m *forwardingManager) createFwd(from, to, this telepathy.Channel, alias Alias) string {
+func (m *Service) createFwd(from, to, this telepathy.Channel, alias Alias) string {
 	insertRet := <-m.table.insert(from,
 		TableEntry{
 			Channel: to,
@@ -236,33 +259,31 @@ func (m *forwardingManager) createFwd(from, to, this telepathy.Channel, alias Al
 		toMsg.WriteString(alias.SrcAlias)
 		toMsg.WriteString(")")
 	}
-	outMsg := &telepathy.OutboundMessage{}
+	outMsg := telepathy.OutboundMessage{}
 
 	// Send notifications to related channels
 	// if the channel is the key-setting channel, return the notification string rather than send it directly
-	var msgrHandler telepathy.GlobalMessenger
 	if from == this {
 		ret = fromMsg.String()
 		outMsg.Text = toMsg.String()
-		outMsg.TargetID = to.ChannelID
-		msgrHandler, _ = m.session.Message.Messenger(to.MessengerID)
+		outMsg.ToChannel = to
 	} else {
 		ret = toMsg.String()
 		outMsg.Text = fromMsg.String()
-		outMsg.TargetID = from.ChannelID
-		msgrHandler, _ = m.session.Message.Messenger(from.MessengerID)
+		outMsg.ToChannel = from
 	}
 
-	msgrHandler.Send(outMsg)
+	m.outMsg <- outMsg
 	return ret
 }
 
-func (m *forwardingManager) setKeyProcess(key string, channel telepathy.Channel) func(*redis.Client) interface{} {
+func (m *Service) setKeyProcess(key string, channel telepathy.Channel) func(*redis.Client) interface{} {
 	// Construct the Redis request action function
 	// String returned by Action function should be used as command reply
 	return func(client *redis.Client) interface{} {
-		logger := logger.WithField("phase", "setKey")
-		errInvalidKey := "Invalid key, or key time out. Please restart setup process"
+		errInvalidKey := publicError{
+			msg: "Invalid key, or key time out. Please restart setup process",
+		}
 
 		// Get Index to find the Session to set channel info
 		cmdstr, err := client.Get(key).Result()
@@ -286,7 +307,9 @@ func (m *forwardingManager) setKeyProcess(key string, channel telepathy.Channel)
 			if err == redis.Nil {
 				return errInvalidKey
 			}
-			logger.Error("Session key get failed: " + err.Error())
+			return internalError{
+				msg: "get session key failed: " + err.Error(),
+			}
 		}
 
 		err = json.Unmarshal([]byte(cmdstr), &session)
@@ -295,9 +318,10 @@ func (m *forwardingManager) setKeyProcess(key string, channel telepathy.Channel)
 			return errInvalidKey
 		}
 
-		errSameFwd := `Cannot create forwarding in the same channel
-Setup process is terminated`
-		errUnknown := "Internal Error. Please restart setup process"
+		errSameFwd := publicError{
+			msg: `Cannot create forwarding in the same channel
+Setup process is terminated`,
+		}
 
 		ret := strings.Builder{}
 		// Set channel info to Session field
@@ -317,8 +341,9 @@ Setup process is terminated`
 			session.Second = channel
 			fmt.Fprintf(&ret, "Successfully set this channel as: %s", session.SecondAlias)
 		default:
-			logger.Errorf("Got invalid Index.Index: %v", ind)
-			return errUnknown
+			return internalError{
+				msg: fmt.Sprintf("got invalid Index.Index: %v", ind),
+			}
 		}
 
 		if session.First.ChannelID == "" || session.Second.ChannelID == "" {
@@ -329,25 +354,21 @@ Setup process is terminated`
 			sessionStr, _ := json.Marshal(session)
 			err = client.SetXX(ind.SessionKey, string(sessionStr), redisExpireTime).Err()
 			if err != nil {
-				logger.Error("Store back Session error: " + err.Error())
-				return errUnknown
+				return internalError{
+					msg: fmt.Sprintf("Store back Session error: " + err.Error()),
+				}
 			}
 		} else {
 			// If both channels are set, remove Session from redis and create forwarding
 			client.Del(ind.SessionKey)
 
 			// Twoway or oneway?
-			preCreateLog := logger.WithFields(logrus.Fields{
-				"first_channel":  session.First,
-				"second_channel": session.Second,
-			})
 			switch cmd := session.Cmd; cmd {
 			case oneWay:
 				alias := Alias{
 					SrcAlias: session.FirstAlias,
 					DstAlias: session.SecondAlias,
 				}
-				preCreateLog.Info("Creating one-way forwarding")
 				ret.WriteString("\n")
 				ret.WriteString(m.createFwd(session.First, session.Second, channel, alias))
 			case twoWay:
@@ -355,7 +376,6 @@ Setup process is terminated`
 					SrcAlias: session.FirstAlias,
 					DstAlias: session.SecondAlias,
 				}
-				preCreateLog.Info("Creating two-way forwarding")
 				ret.WriteString("\n")
 				ret.WriteString(m.createFwd(session.First, session.Second, channel, alias))
 				ret.WriteString("\n")
@@ -365,8 +385,9 @@ Setup process is terminated`
 				}
 				ret.WriteString(m.createFwd(session.Second, session.First, channel, alias))
 			default:
-				preCreateLog.Errorf("got invalid Cmd in Session: %v", session)
-				return errUnknown
+				return internalError{
+					msg: fmt.Sprintf("got invalid Cmd in Session: %v", session),
+				}
 			}
 			m.writeToDB()
 		}

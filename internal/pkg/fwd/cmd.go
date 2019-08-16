@@ -4,44 +4,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/argo"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
-var logger = logrus.WithField("module", "fwd")
-
-const funcKey = "fwd"
-
-// PublicError is the type of error that is intended to feedback to user
-// The error message will be returned to user
-type PublicError struct {
-	Msg string
-}
-
-// InternalError is the type of error that should not be disclosed to user
-type InternalError struct {
-	Msg string
-}
-
-// TerminatedError indicates system has be interanlly terminated
-type TerminatedError struct {
-	Msg string
-}
-
-func (e PublicError) Error() string {
-	return e.Msg
-}
-
-func (e InternalError) Error() string {
-	return e.Msg
-}
-
-func (e TerminatedError) Error() string {
-	return "Terminated: " + e.Msg
-}
-
-func (m *forwardingManager) CommandInterface() *argo.Action {
+// Command implements telepathy.PluginCommandHandler
+func (m *Service) Command(done <-chan interface{}) *argo.Action {
+	m.cmdDone = done
 	cmd := &argo.Action{
 		Trigger:    funcKey,
 		ShortDescr: "Cross-app Message Forwarding",
@@ -100,7 +69,7 @@ func (m *forwardingManager) CommandInterface() *argo.Action {
 	return cmd
 }
 
-func (m *forwardingManager) createTwoWay(state *argo.State, extras ...interface{}) error {
+func (m *Service) createTwoWay(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
@@ -116,7 +85,7 @@ func (m *forwardingManager) createTwoWay(state *argo.State, extras ...interface{
 	return nil
 }
 
-func (m *forwardingManager) createOneWay(state *argo.State, extras ...interface{}) error {
+func (m *Service) createOneWay(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
@@ -132,7 +101,7 @@ func (m *forwardingManager) createOneWay(state *argo.State, extras ...interface{
 	return nil
 }
 
-func (m *forwardingManager) info(state *argo.State, extras ...interface{}) error {
+func (m *Service) info(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
@@ -162,7 +131,7 @@ func (m *forwardingManager) info(state *argo.State, extras ...interface{}) error
 	return nil
 }
 
-func (m *forwardingManager) set(state *argo.State, extras ...interface{}) error {
+func (m *Service) set(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
@@ -174,19 +143,33 @@ func (m *forwardingManager) set(state *argo.State, extras ...interface{}) error 
 
 	// Set key in redis
 	redisRet := make(chan interface{})
-	m.session.Redis.PushRequest(&telepathy.RedisRequest{
+	m.redisReq <- telepathy.RedisRequest{
 		Action: m.setKeyProcess(key, extraArgs.Message.FromChannel),
 		Return: redisRet,
-	})
+	}
 
 	// Wait for reply
 	select {
 	case <-extraArgs.Ctx.Done():
-		logger.Warn("Terminated")
+		m.logger.Warn("Terminated")
+		state.OutputStr.WriteString("Internal error, please try again later.")
 	case reply := <-redisRet:
-		replyStr, _ := reply.(string)
-		if replyStr != "" {
+		replyStr, ok := reply.(string)
+		if ok && replyStr != "" {
 			state.OutputStr.WriteString(replyStr)
+			break
+		}
+
+		setError, ok := reply.(publicError)
+		if ok {
+			state.OutputStr.WriteString(setError.Error())
+			break
+		}
+
+		setInternalErr, ok := reply.(internalError)
+		if ok {
+			m.logger.WithField("phase", "set-key").Error(setInternalErr.Error())
+			state.OutputStr.WriteString("Internal error, please try again later.")
 		}
 	}
 
@@ -207,7 +190,7 @@ func sliceUniqify(input []string) []string {
 	return output
 }
 
-func (m *forwardingManager) delFrom(state *argo.State, extras ...interface{}) error {
+func (m *Service) delFrom(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
@@ -228,12 +211,11 @@ func (m *forwardingManager) delFrom(state *argo.State, extras ...interface{}) er
 		toChName := fromList[fromCh].DstAlias
 		if ok && <-m.table.delete(fromCh, thisCh) {
 			fmt.Fprintf(&state.OutputStr, "Stop receiving messages from: %s\n", fromChName)
-			messenger, _ := m.session.Message.Messenger(fromCh.MessengerID)
 			msg := telepathy.OutboundMessage{
-				TargetID: fromCh.ChannelID,
-				Text:     fmt.Sprintf("Message forwarding to: %s has been stopped\n", toChName),
+				ToChannel: fromCh,
+				Text:      fmt.Sprintf("Message forwarding to: %s has been stopped\n", toChName),
 			}
-			messenger.Send(&msg)
+			m.outMsg <- msg
 			change = true
 		} else {
 			fmt.Fprintf(&state.OutputStr, "Message forwarding from: %s does not exist\n", fromChName)
@@ -247,7 +229,7 @@ func (m *forwardingManager) delFrom(state *argo.State, extras ...interface{}) er
 	return nil
 }
 
-func (m *forwardingManager) delTo(state *argo.State, extras ...interface{}) error {
+func (m *Service) delTo(state *argo.State, extras ...interface{}) error {
 	extraArgs, ok := extras[0].(telepathy.CmdExtraArgs)
 	if !ok {
 		m.logger.Errorf("failed to parse extraArgs: %T", extras[0])
@@ -268,12 +250,11 @@ func (m *forwardingManager) delTo(state *argo.State, extras ...interface{}) erro
 		fromChName := toList[toCh].SrcAlias
 		if ok && <-m.table.delete(thisCh, toCh) {
 			fmt.Fprintf(&state.OutputStr, "Stop forwarding messages to: %s\n", toChName)
-			messenger, _ := m.session.Message.Messenger(toCh.MessengerID)
 			msg := telepathy.OutboundMessage{
-				TargetID: toCh.ChannelID,
-				Text:     fmt.Sprintf("Message forwarding from: %s has been stopped\n", fromChName),
+				ToChannel: toCh,
+				Text:      fmt.Sprintf("Message forwarding from: %s has been stopped\n", fromChName),
 			}
-			messenger.Send(&msg)
+			m.outMsg <- msg
 			change = true
 		} else {
 			fmt.Fprintf(&state.OutputStr, "Message forwarding to: %s doesnot exist\n", toChName)

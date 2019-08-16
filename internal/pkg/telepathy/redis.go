@@ -2,9 +2,14 @@ package telepathy
 
 import (
 	"context"
+	"sync"
 
 	"github.com/go-redis/redis"
 	"github.com/sirupsen/logrus"
+)
+
+const (
+	redisReqLen = 10
 )
 
 // RedisRequest defines a request to redis handler
@@ -17,9 +22,10 @@ type RedisRequest struct {
 }
 
 type redisHandle struct {
-	client   *redis.Client
-	reqQueue chan *RedisRequest
-	logger   *logrus.Entry
+	client       *redis.Client
+	reqQueue     chan RedisRequest
+	requesterMap map[string]<-chan RedisRequest
+	logger       *logrus.Entry
 }
 
 func newRedisHandle(redisurl string) (*redisHandle, error) {
@@ -32,17 +38,56 @@ func newRedisHandle(redisurl string) (*redisHandle, error) {
 	}
 
 	handle.client = redis.NewClient(options)
-
-	// TODO: define queue length
-	handle.reqQueue = make(chan *RedisRequest)
-
+	handle.reqQueue = make(chan RedisRequest, redisReqLen)
+	handle.requesterMap = make(map[string]<-chan RedisRequest)
 	handle.logger = logger
 
-	logger.Info("created redis handler")
 	return &handle, nil
 }
 
-func (r *redisHandle) start(ctx context.Context) {
+func (r *redisHandle) attachRequester(id string, ch <-chan RedisRequest) {
+	if _, ok := r.requesterMap[id]; ok {
+		r.logger.Panicf("requester exists: %s", id)
+	}
+	r.requesterMap[id] = ch
+}
+
+func (r *redisHandle) worker() {
+	wg := sync.WaitGroup{}
+	wg.Add(len(r.requesterMap))
+	for _, reqCh := range r.requesterMap {
+		go func(ch <-chan RedisRequest) {
+			for req := range ch {
+				r.reqQueue <- req
+			}
+			wg.Done()
+		}(reqCh)
+	}
+
+	go func() {
+		wg.Wait()
+		close(r.reqQueue)
+	}()
+
+	for request := range r.reqQueue {
+		timeout, cancel := context.WithTimeout(context.Background(), dBTimeout)
+		done := make(chan interface{})
+		go func() {
+			ret := request.Action(r.client.WithContext(timeout))
+			request.Return <- ret
+			close(done)
+		}()
+		select {
+		case <-timeout.Done():
+			r.logger.Warnf("request timeout")
+		case <-done:
+			// success
+		}
+		cancel()
+	}
+}
+
+func (r *redisHandle) start() {
 	if err := r.client.Ping().Err(); err != nil {
 		r.logger.Errorf("ping failed: %s", err.Error())
 		return
@@ -52,30 +97,7 @@ func (r *redisHandle) start(ctx context.Context) {
 		r.logger.Errorf("failed to flush all:: %s", err.Error())
 	}
 
-	r.logger.Info("conneted to Redis.")
-
-	// Queue handling routine
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				r.logger.Info("terminated")
-				err := r.client.Close()
-				if err != nil {
-					r.logger.Errorf("failed to close connection: %s", err.Error())
-				} else {
-					r.logger.Info("connection closed")
-				}
-				return
-			case request := <-r.reqQueue:
-				ret := request.Action(r.client.WithContext(ctx))
-				request.Return <- ret
-			}
-		}
-	}()
-}
-
-// PushRequest pushes a new redis request
-func (r *redisHandle) PushRequest(req *RedisRequest) {
-	r.reqQueue <- req
+	r.logger.Info("started")
+	r.worker()
+	r.logger.Info("terminated")
 }

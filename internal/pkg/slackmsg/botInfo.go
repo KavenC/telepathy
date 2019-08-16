@@ -22,10 +22,10 @@ type botInfo struct {
 
 type botInfoMap map[string]botInfo
 
-func (m *messenger) writeBotInfoToDB() chan interface{} {
+func (m *Messenger) writeBotInfoToDB() chan interface{} {
 	ret := make(chan interface{}, 1)
 
-	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
+	m.dbReq <- telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			data := bson.M{
 				"ID":   dbID,
@@ -40,15 +40,15 @@ func (m *messenger) writeBotInfoToDB() chan interface{} {
 			return result
 		},
 		Return: ret,
-	})
+	}
 
 	return ret
 }
 
-func (m *messenger) readBotInfoFromDB() error {
+func (m *Messenger) readBotInfoFromDB() error {
 	ret := make(chan interface{}, 1)
 
-	m.session.DB.PushRequest(&telepathy.DatabaseRequest{
+	m.dbReq <- telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			collection := db.Collection(collectionID)
 			result := collection.FindOne(ctx, map[string]string{"ID": dbID})
@@ -59,7 +59,7 @@ func (m *messenger) readBotInfoFromDB() error {
 			return raw
 		},
 		Return: ret,
-	})
+	}
 
 	// Wait until DB operation done
 	result := <-ret

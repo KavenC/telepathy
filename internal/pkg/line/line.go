@@ -5,36 +5,38 @@
 package line
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
+
+	"gitlab.com/kavenc/telepathy/internal/pkg/imgur"
 
 	"github.com/line/line-bot-sdk-go/linebot"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
-// ID is a unique string to identify this Messenger handler
-const ID = "LINE"
-
-func init() {
-	telepathy.RegisterMessenger(ID, new)
-}
+const (
+	inMsgLen = 5
+)
 
 // InitError indicates an error when initializing Discord messenger handler
 type InitError struct {
 	msg string
 }
 
-// LineMessenger implements the communication with Line APP
-type messenger struct {
-	telepathy.MessengerPlugin
-	session       *telepathy.Session
-	handler       telepathy.InboundMsgHandler
-	ctx           context.Context
+// Messenger implements the communication with Line APP
+type Messenger struct {
+	telepathy.Plugin
+	telepathy.PluginMessenger
+	telepathy.PluginWebhookHandler
+	Secret        string
+	Token         string
+	inMsgChannel  chan telepathy.InboundMessage
+	outMsgChannel <-chan telepathy.OutboundMessage
 	bot           *linebot.Client
 	replyTokenMap sync.Map
 	logger        *logrus.Entry
@@ -44,118 +46,127 @@ func (e InitError) Error() string {
 	return "LINE init failed: " + e.msg
 }
 
-func new(param *telepathy.MsgrCtorParam) (telepathy.Messenger, error) {
-	msg := messenger{
-		session: param.Session,
-		handler: param.MsgHandler,
-		logger:  param.Logger,
-	}
+// ID returns messenger ID
+func (m *Messenger) ID() string {
+	return "LINE"
+}
 
-	sconfig, ok := param.Config["SECRET"]
-	if !ok {
-		return nil, InitError{msg: "config: SECRET loading failed"}
-	}
-	tconfig, ok := param.Config["TOKEN"]
-	if !ok {
-		return nil, InitError{msg: "config: TOKEN loading failed"}
-	}
-	secret, ok := sconfig.(string)
-	if !ok {
-		return nil, InitError{msg: "invalid config: SECRET"}
-	}
-	token, ok := tconfig.(string)
-	if !ok {
-		return nil, InitError{msg: "invalid config: CONFIG"}
-	}
-	bot, err := linebot.New(secret, token)
+// Start starts the plugin
+func (m *Messenger) Start() {
+	bot, err := linebot.New(m.Secret, m.Token)
 	if err != nil {
-		return nil, InitError{msg: err.Error()}
+		m.logger.Panic(err.Error())
 	}
+	m.bot = bot
 
-	msg.bot = bot
-	param.Session.WebServer.RegisterWebhook("line-callback", msg.webhook)
-
-	return &msg, nil
+	m.logger.Info("started")
+	m.transmitter()
+	m.logger.Info("terminated")
 }
 
-func (m *messenger) ID() string {
-	return ID
+// Stop terminates the plugin
+func (m *Messenger) Stop() {
+	close(m.inMsgChannel)
 }
 
-func (m *messenger) Start(ctx context.Context) {
-	m.ctx = ctx
+// SetLogger sets the logger
+func (m *Messenger) SetLogger(logger *logrus.Entry) {
+	m.logger = logger
 }
 
-func (m *messenger) Send(message *telepathy.OutboundMessage) {
-	messages := []linebot.SendingMessage{}
-
-	if message.Text == "" && message.Image == nil {
-		return
+// InMsgChannel provides inbound message channel
+func (m *Messenger) InMsgChannel() <-chan telepathy.InboundMessage {
+	if m.inMsgChannel == nil {
+		m.inMsgChannel = make(chan telepathy.InboundMessage, inMsgLen)
 	}
+	return m.inMsgChannel
+}
 
-	text := strings.Builder{}
-	if message.AsName != "" {
-		fmt.Fprintf(&text, "[ %s ]", message.AsName)
-		if message.Text != "" {
-			fmt.Fprintf(&text, "\n%s", message.Text)
+// AttachOutMsgChannel attaches outbound message channel
+func (m *Messenger) AttachOutMsgChannel(ch <-chan telepathy.OutboundMessage) {
+	m.outMsgChannel = ch
+}
+
+// Webhook provides webhook endpoints
+func (m *Messenger) Webhook() map[string]telepathy.HTTPHandler {
+	return map[string]telepathy.HTTPHandler{
+		"line-callback": m.webhookHandler,
+	}
+}
+
+// SetWebhookURL receives webhook urls
+func (m *Messenger) SetWebhookURL(urls map[string]*url.URL) {
+
+}
+
+func (m *Messenger) transmitter() {
+	for message := range m.outMsgChannel {
+		messages := []linebot.SendingMessage{}
+
+		if message.Text == "" && message.Image == nil {
+			continue
 		}
-	} else {
-		text.WriteString(message.Text)
-	}
 
-	if text.Len() > 0 {
-		messages = append(messages, linebot.NewTextMessage(text.String()))
-	}
-
-	if message.Image != nil {
-		fullURL, err := message.Image.FullURL()
-		var prevURL string
-		if err == nil {
-			prevURL, err = message.Image.SmallThumbnailURL()
-		}
-		if err != nil {
-			m.logger.Error("unable to get image URL: " + err.Error())
+		text := strings.Builder{}
+		if message.AsName != "" {
+			fmt.Fprintf(&text, "[ %s ]", message.AsName)
+			if message.Text != "" {
+				fmt.Fprintf(&text, "\n%s", message.Text)
+			}
 		} else {
-			messages = append(messages, linebot.NewImageMessage(fullURL, prevURL))
+			text.WriteString(message.Text)
 		}
-	}
 
-	// Try to use reply token
-	item, _ := m.replyTokenMap.LoadOrStore(message.TargetID, &sync.Pool{})
-	pool, _ := item.(*sync.Pool)
-	item = pool.Get()
-	if item != nil {
-		replyTokenStr, _ := item.(string)
-		call := m.bot.ReplyMessage(replyTokenStr, messages...)
+		if text.Len() > 0 {
+			messages = append(messages, linebot.NewTextMessage(text.String()))
+		}
+
+		if message.Image != nil {
+			fullURL, err := message.Image.FullURL()
+			var prevURL string
+			if err == nil {
+				prevURL, err = message.Image.SmallThumbnailURL()
+			}
+			if err != nil {
+				m.logger.Error("unable to get image URL: " + err.Error())
+			} else {
+				messages = append(messages, linebot.NewImageMessage(fullURL, prevURL))
+			}
+		}
+
+		// Try to use reply token
+		channelID := message.ToChannel.ChannelID
+		item, _ := m.replyTokenMap.LoadOrStore(channelID, &sync.Pool{})
+		pool, _ := item.(*sync.Pool)
+		item = pool.Get()
+		if item != nil {
+			replyTokenStr, _ := item.(string)
+			call := m.bot.ReplyMessage(replyTokenStr, messages...)
+			_, err := call.Do()
+
+			if err == nil {
+				continue
+			}
+
+			// If send failed with replyToken, output err msg and retry with PushMessage
+			logger := m.logger.WithFields(logrus.Fields{
+				"target":      channelID,
+				"reply_token": replyTokenStr,
+			})
+			logger.Warn("reply message failed: " + err.Error())
+			logger.Info("trying push message")
+		}
+
+		call := m.bot.PushMessage(channelID, messages...)
 		_, err := call.Do()
-
-		if err == nil {
-			return
+		if err != nil {
+			logger := m.logger.WithField("target", channelID)
+			logger.Error("push message failed: " + err.Error())
 		}
-
-		// If send failed with replyToken, output err msg and retry with PushMessage
-		logger := m.logger.WithFields(logrus.Fields{
-			"target":      message.TargetID,
-			"reply_token": replyTokenStr,
-		})
-		logger.Warn("reply message failed: " + err.Error())
-		logger.Info("trying push message")
-	}
-
-	call := m.bot.PushMessage(message.TargetID, messages...)
-	_, err := call.Do()
-	if err != nil {
-		logger := m.logger.WithField("target", message.TargetID)
-		logger.Error("push message failed: " + err.Error())
 	}
 }
 
-func (m *messenger) webhook(response http.ResponseWriter, request *http.Request) {
-	if m.ctx == nil {
-		m.logger.Warn("event dropped")
-		return
-	}
-
+func (m *Messenger) webhookHandler(response http.ResponseWriter, request *http.Request) {
 	events, err := m.bot.ParseRequest(request)
 	if err != nil {
 		m.logger.Errorf("invalid request: %s", err.Error())
@@ -170,7 +181,7 @@ func (m *messenger) webhook(response http.ResponseWriter, request *http.Request)
 	for _, event := range events {
 		if event.Type == linebot.EventTypeMessage {
 			message := telepathy.InboundMessage{FromChannel: telepathy.Channel{
-				MessengerID: ID,
+				MessengerID: m.ID(),
 			}}
 			profile, channelID := m.getSourceProfile(event.Source)
 			message.SourceProfile = profile
@@ -200,8 +211,8 @@ func (m *messenger) webhook(response http.ResponseWriter, request *http.Request)
 					m.logger.Warn("fail to read image content")
 					continue
 				}
-				message.Image = telepathy.NewImage(
-					telepathy.ByteContent{
+				message.Image = imgur.NewImage(
+					imgur.ByteContent{
 						Type:    response.ContentType,
 						Content: content,
 					})
@@ -209,12 +220,12 @@ func (m *messenger) webhook(response http.ResponseWriter, request *http.Request)
 				m.logger.Warnf("unsupported message type: %T", event.Message)
 				continue
 			}
-			m.handler(m.ctx, message)
+			m.inMsgChannel <- message
 		}
 	}
 }
 
-func (m *messenger) getSourceProfile(source *linebot.EventSource) (*telepathy.MsgrUserProfile, string) {
+func (m *Messenger) getSourceProfile(source *linebot.EventSource) (*telepathy.MsgrUserProfile, string) {
 	if source.GroupID != "" {
 		profile, err := m.bot.GetGroupMemberProfile(source.GroupID, source.UserID).Do()
 		if err != nil {

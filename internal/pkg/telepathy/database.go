@@ -2,10 +2,16 @@ package telepathy
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/sirupsen/logrus"
+)
+
+const (
+	dBReqLen  = 10
+	dBTimeout = time.Minute
 )
 
 // DatabaseRequest defines a request for database
@@ -18,11 +24,12 @@ type DatabaseRequest struct {
 }
 
 type databaseHandler struct {
-	dbName   string
-	client   *mongo.Client
-	database *mongo.Database
-	reqQueue chan *DatabaseRequest
-	logger   *logrus.Entry
+	dbName       string
+	client       *mongo.Client
+	database     *mongo.Database
+	reqQueue     chan DatabaseRequest
+	requesterMap map[string]<-chan DatabaseRequest
+	logger       *logrus.Entry
 }
 
 func newDatabaseHandler(mongourl string, dbname string) (*databaseHandler, error) {
@@ -34,48 +41,73 @@ func newDatabaseHandler(mongourl string, dbname string) (*databaseHandler, error
 		logger.Error("failed to create mongo client")
 		return nil, err
 	}
-	handler.reqQueue = make(chan *DatabaseRequest)
+	handler.reqQueue = make(chan DatabaseRequest, dBReqLen)
 	handler.logger = logger
-	logger.Info("created database handler: Mongo")
+	handler.requesterMap = make(map[string]<-chan DatabaseRequest)
+
 	return &handler, nil
 }
 
-func (h *databaseHandler) start(ctx context.Context) {
-	timeCtx, cancel := context.WithTimeout(ctx, time.Minute)
+func (h *databaseHandler) attachRequester(id string, ch <-chan DatabaseRequest) {
+	if _, ok := h.requesterMap[id]; ok {
+		h.logger.Panicf("requester exists: %s", id)
+	}
+	h.requesterMap[id] = ch
+}
+
+func (h *databaseHandler) worker() {
+	wg := sync.WaitGroup{}
+	wg.Add(len(h.requesterMap))
+	for _, reqCh := range h.requesterMap {
+		go func(ch <-chan DatabaseRequest) {
+			for req := range ch {
+				h.reqQueue <- req
+			}
+			wg.Done()
+		}(reqCh)
+	}
+
+	go func() {
+		wg.Wait()
+		close(h.reqQueue)
+	}()
+
+	for request := range h.reqQueue {
+		timeout, cancel := context.WithTimeout(context.Background(), dBTimeout)
+		done := make(chan interface{})
+		go func() {
+			ret := request.Action(timeout, h.database)
+			request.Return <- ret
+			close(done)
+		}()
+
+		select {
+		case <-timeout.Done():
+			h.logger.Warnf("request timeout")
+		case <-done:
+		}
+		cancel()
+	}
+}
+
+func (h *databaseHandler) start() {
+	timeCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	err := h.client.Connect(timeCtx)
 	cancel()
 	if err != nil {
 		h.logger.Errorf("failed to connect to MongoDB: %s", err.Error())
 		return
 	}
+
 	h.database = h.client.Database(h.dbName)
+	h.logger.Infof("started. Database name: %s", h.dbName)
 
-	h.logger.Infof("connected to MongoDB. Database name: %s", h.dbName)
+	h.worker()
 
-	// Queue handling routine
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				h.logger.Info("terminated")
-				timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				err := h.client.Disconnect(timeoutCtx)
-				cancel()
-				if err != nil {
-					h.logger.Errorf("failed to disconnect: %s", err.Error())
-				} else {
-					h.logger.Info("disconnected")
-				}
-				return
-			case request := <-h.reqQueue:
-				ret := request.Action(ctx, h.database)
-				request.Return <- ret
-			}
-		}
-	}()
-}
-
-// PushRequest pushes a new database request
-func (h *databaseHandler) PushRequest(req *DatabaseRequest) {
-	h.reqQueue <- req
+	err = h.client.Disconnect(context.Background())
+	if err != nil {
+		h.logger.Errorf("failed to disconnect: %s", err.Error())
+	}
+	h.logger.Info("terminated")
+	return
 }

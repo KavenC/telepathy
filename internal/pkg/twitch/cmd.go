@@ -155,7 +155,7 @@ func (s *Service) unsubStream(state *argo.State, extraArgs ...interface{}) error
 	channel := extArg.Message.FromChannel
 	_, channelRemoved := subtable.remove(*userID, channel)
 	if !channelRemoved {
-		fmt.Printf("This channel didn't subscribed to: %s", userLogin)
+		fmt.Fprintf(&state.OutputStr, "This channel didn't subscribed to: %s", userLogin)
 		return nil
 	}
 
@@ -163,7 +163,7 @@ func (s *Service) unsubStream(state *argo.State, extraArgs ...interface{}) error
 	// the subscription will be terminated when:
 	// 1. Receiving notification and we respond with 410
 	// 2. When renewing routine comes up and find out that there is no subscribers
-	fmt.Printf("Unsubscribed to: %s", userLogin)
+	fmt.Fprintf(&state.OutputStr, "Unsubscribed to: %s", userLogin)
 
 	return nil
 }

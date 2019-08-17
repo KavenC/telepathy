@@ -8,14 +8,21 @@ import (
 )
 
 type table struct {
-	lock sync.RWMutex
-	data map[string]map[telepathy.Channel]bool
+	lock  sync.RWMutex
+	data  map[string]map[telepathy.Channel]bool
+	dirty bool
 }
 
 func newTable() *table {
 	return &table{
 		data: make(map[string]map[telepathy.Channel]bool),
 	}
+}
+
+func (t *table) isDirty() bool {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	return t.dirty
 }
 
 func (t *table) getKeys() []string {
@@ -35,11 +42,13 @@ func (t *table) lookUpOrAdd(key string, channel telepathy.Channel) (keyExists bo
 	if !keyExists {
 		chExists = false
 		t.data[key] = map[telepathy.Channel]bool{channel: true}
+		t.dirty = true
 		return
 	}
 	_, chExists = chmap[channel]
 	if !chExists {
 		chmap[channel] = true
+		t.dirty = true
 	}
 	return
 }
@@ -67,6 +76,7 @@ func (t *table) remove(key string, channel telepathy.Channel) (keyRemoved bool, 
 	if !chExists {
 		return false, false
 	}
+	t.dirty = true
 	delete(chmap, channel)
 	if len(chmap) == 0 {
 		delete(t.data, key)
@@ -84,6 +94,7 @@ func (t *table) add(key string, channel telepathy.Channel) bool {
 	chmap, ok := t.data[key]
 	if !ok {
 		t.data[key] = map[telepathy.Channel]bool{channel: true}
+		t.dirty = true
 		return true
 	}
 
@@ -92,6 +103,7 @@ func (t *table) add(key string, channel telepathy.Channel) bool {
 	}
 
 	chmap[channel] = true
+	t.dirty = true
 	return true
 }
 
@@ -117,8 +129,8 @@ func (t *table) getList(key string) (map[telepathy.Channel]bool, bool) {
 }
 
 func (t *table) bson() *bson.A {
-	t.lock.RLock()
-	defer t.lock.RUnlock()
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	array := bson.A{}
 
 	for key, list := range t.data {
@@ -129,6 +141,7 @@ func (t *table) bson() *bson.A {
 		array = append(array, bson.A{key, chArray})
 	}
 
+	t.dirty = false
 	return &array
 }
 
@@ -170,5 +183,6 @@ func (t *table) fromBSON(raw bson.RawValue) error {
 		t.data[key] = list
 	}
 
+	t.dirty = false
 	return nil
 }

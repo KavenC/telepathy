@@ -19,6 +19,7 @@ const (
 	tableInsert = 0
 	tableDelete = 1
 	tableBSON   = 2
+	tableDirty  = 3
 )
 
 // Alias is the alias information of a channel in forwarding table
@@ -46,6 +47,7 @@ type tableOp struct {
 type table struct {
 	data    sync.Map
 	opQueue chan tableOp
+	dirty   bool
 }
 
 type insertRet struct {
@@ -67,6 +69,8 @@ func (ft *table) start() {
 			op.ret <- ft.deleteImpl(op)
 		} else if op.action == tableBSON {
 			op.ret <- ft.bsonImpl()
+		} else if op.action == tableDirty {
+			op.ret <- ft.dirtyImpl()
 		}
 	}
 }
@@ -84,7 +88,7 @@ func (ft *table) insert(from telepathy.Channel, to TableEntry) chan insertRet {
 	}
 
 	ft.opQueue <- op
-	ret := make(chan insertRet)
+	ret := make(chan insertRet, 1)
 	go func() {
 		opRet := <-op.ret
 		iRet, _ := opRet.(insertRet)
@@ -103,7 +107,7 @@ func (ft *table) delete(from, to telepathy.Channel) chan bool {
 	}
 
 	ft.opQueue <- op
-	ret := make(chan bool)
+	ret := make(chan bool, 1)
 	go func() {
 		opRet := <-op.ret
 		iRet, _ := opRet.(bool)
@@ -138,11 +142,23 @@ func (ft *table) getTo(from telepathy.Channel) channelList {
 func (ft *table) bson() chan *bson.A {
 	op := tableOp{action: tableBSON, ret: make(chan interface{})}
 	ft.opQueue <- op
-	ret := make(chan *bson.A)
+	ret := make(chan *bson.A, 1)
 	go func() {
 		opRet := <-op.ret
 		bs, _ := opRet.(*bson.A)
 		ret <- bs
+	}()
+	return ret
+}
+
+func (ft *table) isDirty() chan bool {
+	op := tableOp{action: tableDirty, ret: make(chan interface{})}
+	ft.opQueue <- op
+	ret := make(chan bool, 1)
+	go func() {
+		opRet := <-op.ret
+		d, _ := opRet.(bool)
+		ret <- d
 	}()
 	return ret
 }
@@ -223,6 +239,7 @@ func (ft *table) deleteImpl(op tableOp) bool {
 	if exists {
 		delete(toList, op.entry.Channel)
 		ft.data.Store(op.key, toList)
+		ft.dirty = true
 	}
 	return exists
 }
@@ -242,7 +259,13 @@ func (ft *table) bsonImpl() *bson.A {
 		return true
 	})
 
+	ft.dirty = false
+
 	return &tableBSON
+}
+
+func (ft *table) dirtyImpl() bool {
+	return ft.dirty
 }
 
 // This function should only be used before start()
@@ -286,6 +309,8 @@ func (ft *table) loadBSON(input bson.RawValue) error {
 		}
 		ft.data.Store(from, list)
 	}
+
+	ft.dirty = false
 
 	return nil
 }

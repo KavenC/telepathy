@@ -73,6 +73,7 @@ The following environment variables are necessary:
 |SLACK_CLIENT_SECRET|Slack app client secret (needed for OAuth)|
 |SLACK_SIGNING_SECRET|Slack message sign secret. (validate Slack reqests)|
 |TWITCH_CLIENT_ID|Twitch api client ID|
+|TWITCH_SECRET|Twitch secret for validating webusub notifications|
 
 Note that variables for `IMGUR_*` and `MONGODB_*` are needed for Telepathy core.
 The others can be optional and only needed if you enabled the service/messenger.

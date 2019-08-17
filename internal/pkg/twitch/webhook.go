@@ -72,11 +72,11 @@ func (s *Service) handleWebhookReq(req *http.Request) int {
 	var mac hash.Hash
 	switch method {
 	case "sha1":
-		mac = hmac.New(sha1.New, s.websubSecret)
+		mac = hmac.New(sha1.New, s.WebsubSecret)
 	case "sha256":
-		mac = hmac.New(sha256.New, s.websubSecret)
+		mac = hmac.New(sha256.New, s.WebsubSecret)
 	case "sha512":
-		mac = hmac.New(sha512.New, s.websubSecret)
+		mac = hmac.New(sha512.New, s.WebsubSecret)
 	default:
 		logger.Warnf("invalid validation method: %s", methodMac)
 		return 200

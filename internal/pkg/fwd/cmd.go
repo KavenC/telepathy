@@ -171,7 +171,6 @@ func (m *Service) delFrom(state *argo.State, extras ...interface{}) error {
 	thisCh := extraArgs.Message.FromChannel
 	uniqueArgs := sliceUniqify(state.Args())
 
-	change := false
 	fromList := m.table.getFrom(thisCh)
 	aliasMap := make(map[string]telepathy.Channel)
 	for fromCh, alias := range fromList {
@@ -188,14 +187,9 @@ func (m *Service) delFrom(state *argo.State, extras ...interface{}) error {
 				Text:      fmt.Sprintf("Message forwarding to: %s has been stopped\n", toChName),
 			}
 			m.outMsg <- msg
-			change = true
 		} else {
 			fmt.Fprintf(&state.OutputStr, "Message forwarding from: %s does not exist\n", fromChName)
 		}
-	}
-
-	if change {
-		m.writeToDB()
 	}
 
 	return nil
@@ -210,7 +204,6 @@ func (m *Service) delTo(state *argo.State, extras ...interface{}) error {
 	thisCh := extraArgs.Message.FromChannel
 	uniqueArgs := sliceUniqify(state.Args())
 
-	change := false
 	toList := m.table.getTo(thisCh)
 	aliasMap := make(map[string]telepathy.Channel)
 	for toCh, alias := range toList {
@@ -227,14 +220,9 @@ func (m *Service) delTo(state *argo.State, extras ...interface{}) error {
 				Text:      fmt.Sprintf("Message forwarding from: %s has been stopped\n", fromChName),
 			}
 			m.outMsg <- msg
-			change = true
 		} else {
 			fmt.Fprintf(&state.OutputStr, "Message forwarding to: %s doesnot exist\n", toChName)
 		}
-	}
-
-	if change {
-		m.writeToDB()
 	}
 
 	return nil

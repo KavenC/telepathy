@@ -222,7 +222,7 @@ func (ft *table) insertImpl(op tableOp) insertRet {
 
 	toList[op.entry.Channel] = op.entry.Alias
 	ft.data.Store(op.key, toList)
-
+	ft.dirty = true
 	return insertRet{
 		ok:    true,
 		Alias: op.entry.Alias,

@@ -312,7 +312,6 @@ Setup process is terminated`
 				msg: fmt.Sprintf("got invalid Cmd in Session: %v", session),
 			}
 		}
-		m.writeToDB()
 	}
 	return ret.String(), nil
 }

@@ -9,8 +9,6 @@ import (
 	"net/url"
 	"sync"
 
-	"gitlab.com/kavenc/telepathy/internal/pkg/randstr"
-
 	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/mongodb/mongo-go-driver/mongo/options"
@@ -61,7 +59,7 @@ type Service struct {
 	streamStatus sync.Map // UserID -> stream status
 
 	// HMAC secret for validating incoming notifications
-	websubSecret []byte
+	WebsubSecret []byte
 
 	// The client ID of twitch API
 	ClientID string
@@ -88,10 +86,9 @@ func (s *Service) Start() {
 
 	s.renewCtx, s.renewCancel = context.WithCancel(context.Background())
 
-	s.websubSecret = []byte(randstr.Generate(32))
 	s.api = newTwitchAPI()
 	s.api.clientID = s.ClientID
-	s.api.websubSecret = string(s.websubSecret)
+	s.api.websubSecret = string(s.WebsubSecret)
 	s.api.webhookURL = s.webhookURL
 	s.api.logger = s.logger.WithField("module", "api")
 

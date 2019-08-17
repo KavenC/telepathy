@@ -215,7 +215,6 @@ func (s *Service) subscription(ctx context.Context, topic string, params *url.Va
 					}
 				case <-ctx.Done():
 					// renew routine cancelled
-					logger.Warnf("renew cancelled: %s", key)
 				}
 			}()
 		}

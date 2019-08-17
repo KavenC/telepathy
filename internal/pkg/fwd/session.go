@@ -83,7 +83,6 @@ func (m *Service) allocateKeys() []string {
 		for ; r > 0; r-- {
 			key := randstr.Generate(len)
 			err := m.sessionKeys.Add(key, "", cache.DefaultExpiration)
-			logger.Warnf("allocating key: %s", key)
 			if err != nil {
 				// key exists, retry
 				continue
@@ -312,7 +311,6 @@ Setup process is terminated`
 				msg: fmt.Sprintf("got invalid Cmd in Session: %v", session),
 			}
 		}
-		m.writeToDB()
 	}
 	return ret.String(), nil
 }

@@ -3,6 +3,7 @@ package fwd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/patrickmn/go-cache"
 
@@ -15,12 +16,13 @@ import (
 )
 
 const (
-	id          = "FWD"
-	funcKey     = "fwd"
-	dbTableName = "fwdtable"
-	outMsgLen   = 20
-	dbReqLen    = 1
-	redisReqLen = 1
+	id             = "FWD"
+	funcKey        = "fwd"
+	dbTableName    = "fwdtable"
+	outMsgLen      = 20
+	dbReqLen       = 1
+	redisReqLen    = 1
+	dbSyncInterval = 10 * time.Minute
 )
 
 // Service defines the plugin structure
@@ -38,7 +40,13 @@ type Service struct {
 
 	sessionKeys *cache.Cache
 	table       *table
-	logger      *logrus.Entry
+
+	// Control variables for db sync routine
+	dbCtx    context.Context
+	dbCancel context.CancelFunc
+	dbDone   chan interface{}
+
+	logger *logrus.Entry
 }
 
 // ID implements telepathy.Plugin
@@ -54,6 +62,8 @@ func (m *Service) SetLogger(logger *logrus.Entry) {
 // Start implements telepathy.Plugin
 func (m *Service) Start() {
 	m.sessionKeys = cache.New(keyExpireTime, keyExpireTime)
+	m.dbCtx, m.dbCancel = context.WithCancel(context.Background())
+	m.dbDone = make(chan interface{})
 	m.table = newTable()
 
 	// Starting sequence
@@ -64,6 +74,8 @@ func (m *Service) Start() {
 	if err != nil {
 		m.logger.Errorf("table LoadDB failed: %s", err.Error())
 	}
+
+	go m.dbSyncRoutine()
 
 	tableDone := make(chan interface{})
 	go func() {
@@ -87,8 +99,9 @@ func (m *Service) Start() {
 	// 5. close db
 	<-msgDone
 	<-m.cmdDone
+	m.dbCancel()
 	close(m.outMsg)
-	<-m.writeToDB()
+	<-m.dbDone
 	m.table.stop()
 	<-tableDone
 	close(m.dbReq)
@@ -134,6 +147,27 @@ func (m *Service) msgHandler() {
 				}
 				m.outMsg <- outMsg
 			}
+		}
+	}
+}
+
+func (m *Service) dbSyncRoutine() {
+	defer close(m.dbDone)
+	do := func() {
+		dirty := <-m.table.isDirty()
+		if dirty {
+			<-m.writeToDB()
+			m.logger.WithField("phase", "dbSyncRoutine").Info("fwd table sync to DB")
+		}
+	}
+
+	for {
+		select {
+		case <-time.After(dbSyncInterval):
+			do()
+		case <-m.dbCtx.Done():
+			do()
+			return
 		}
 	}
 }

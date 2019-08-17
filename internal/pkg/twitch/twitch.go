@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
@@ -17,7 +18,8 @@ import (
 )
 
 const (
-	twitchURL = "https://www.twitch.tv/"
+	twitchURL      = "https://www.twitch.tv/"
+	dbSyncInterval = 10 * time.Minute
 )
 
 type notification struct {
@@ -58,6 +60,11 @@ type Service struct {
 
 	streamStatus sync.Map // UserID -> stream status
 
+	// DB routine
+	dbCtx    context.Context
+	dbCancel context.CancelFunc
+	dbDone   chan interface{}
+
 	// HMAC secret for validating incoming notifications
 	WebsubSecret []byte
 
@@ -86,6 +93,9 @@ func (s *Service) Start() {
 
 	s.renewCtx, s.renewCancel = context.WithCancel(context.Background())
 
+	s.dbCtx, s.dbCancel = context.WithCancel(context.Background())
+	s.dbDone = make(chan interface{})
+
 	s.api = newTwitchAPI()
 	s.api.clientID = s.ClientID
 	s.api.websubSecret = string(s.WebsubSecret)
@@ -109,6 +119,8 @@ func (s *Service) Start() {
 	wg.Wait()
 	cancel()
 
+	go s.dbUpdateRoutine()
+
 	go s.notifHandler()
 
 	s.logger.Info("started")
@@ -116,7 +128,7 @@ func (s *Service) Start() {
 	<-s.cmdDone
 
 	// write back db
-	dbDone := s.writeToDB("streams")
+	s.dbCancel()
 
 	// Cancel all websub renewal routines
 	s.renewCancel()
@@ -127,7 +139,7 @@ func (s *Service) Start() {
 	close(s.msgOut)
 
 	// wait for writeback
-	<-dbDone
+	<-s.dbDone
 	close(s.dbReq)
 
 	s.logger.Info("terminated")
@@ -152,6 +164,30 @@ func (s *Service) DBRequestChannel() <-chan telepathy.DatabaseRequest {
 		s.dbReq = make(chan telepathy.DatabaseRequest, 1)
 	}
 	return s.dbReq
+}
+
+func (s *Service) dbUpdateRoutine() {
+	defer close(s.dbDone)
+	logger := s.logger.WithField("phase", "dbRoutine")
+
+	do := func() {
+		for topic, table := range s.subTopics {
+			if table.isDirty() {
+				<-s.writeToDB(topic)
+				logger.Infof("topic: %s written to DB", topic)
+			}
+		}
+	}
+
+	for {
+		select {
+		case <-time.After(dbSyncInterval):
+			do()
+		case <-s.dbCtx.Done():
+			do()
+			return
+		}
+	}
 }
 
 func (s *Service) writeToDB(topic string) chan interface{} {

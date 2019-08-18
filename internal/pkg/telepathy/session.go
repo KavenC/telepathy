@@ -128,14 +128,16 @@ func (s *Session) initPlugin() {
 func (s *Session) Start() {
 	s.done = make(chan interface{})
 	// Start backend services
-	s.logger.Info("starting backend services")
 	wgBackend := sync.WaitGroup{}
-	startBackend := func(f func()) {
+	s.logger.Info("starting database service")
+	go func() {
 		wgBackend.Add(1)
-		f()
+		err := s.db.start()
 		wgBackend.Done()
-	}
-	go startBackend(s.db.start)
+		if err != nil {
+			s.db.logger.Errorf(err.Error())
+		}
+	}()
 
 	// Start plugins
 	wgPlugin := sync.WaitGroup{}

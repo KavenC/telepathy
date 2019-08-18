@@ -90,13 +90,13 @@ func (h *databaseHandler) worker() {
 	}
 }
 
-func (h *databaseHandler) start() {
+func (h *databaseHandler) start() error {
 	timeCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	err := h.client.Connect(timeCtx)
 	cancel()
 	if err != nil {
-		h.logger.Errorf("failed to connect to MongoDB: %s", err.Error())
-		return
+		h.logger.Errorf("failed to connect to MongoDB")
+		return err
 	}
 
 	h.database = h.client.Database(h.dbName)
@@ -106,8 +106,9 @@ func (h *databaseHandler) start() {
 
 	err = h.client.Disconnect(context.Background())
 	if err != nil {
-		h.logger.Errorf("failed to disconnect: %s", err.Error())
+		h.logger.Errorf("failed to disconnect")
+		return err
 	}
 	h.logger.Info("terminated")
-	return
+	return nil
 }

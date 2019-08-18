@@ -1,15 +1,27 @@
 package telepathy
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
+)
 
 const (
-	testDBURL  = "mongodb://localhost:27017"
+	testDBURL  = "mongodb://mongo:27017/test"
 	testDBName = "testDBName"
 )
 
-func TestDatabaseConn(t *testing.T) {
-	_, err := newDatabaseHandler(testDBURL, testDBName)
-	if err != nil {
-		t.Errorf(err.Error())
+type DatabaseTestSuite struct {
+	suite.Suite
+	handler *databaseHandler
+}
+
+func TestDatabaseConnection(t *testing.T) {
+	assert := assert.New(t)
+	handler, err := newDatabaseHandler(testDBURL, testDBName)
+	if assert.NoError(err) {
+		assert.NotNil(handler)
 	}
+	assert.NoError(handler.start())
 }

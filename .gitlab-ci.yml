@@ -27,10 +27,9 @@ ensure:
     paths:
       - vendor/
 
-dbtests:
+telepathy:
   stage: test
   services:
     - mongo:latest
   script:
-    - go test -race $REPO_NAME/internal/pkg/telepathy -run ^\(TestDatabaseConn\)$
-
+    - go test -timeout 10s -race $REPO_NAME/internal/pkg/telepathy

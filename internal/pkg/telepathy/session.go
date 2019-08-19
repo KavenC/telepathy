@@ -125,18 +125,18 @@ func (s *Session) initPlugin() {
 
 // Start starts a Telepathy session
 // The function always returns an error when the seesion is terminated
-func (s *Session) Start() {
+func (s *Session) Start(ctx context.Context) {
 	s.done = make(chan interface{})
-	// Start backend services
+
 	wgBackend := sync.WaitGroup{}
-	s.logger.Info("starting database service")
+	// Start database
 	go func() {
 		wgBackend.Add(1)
-		err := s.db.start()
-		wgBackend.Done()
+		err := s.db.start(ctx)
 		if err != nil {
 			s.db.logger.Errorf(err.Error())
 		}
+		wgBackend.Done()
 	}()
 
 	// Start plugins

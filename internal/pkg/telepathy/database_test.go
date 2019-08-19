@@ -3,7 +3,6 @@ package telepathy
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -12,16 +11,30 @@ const (
 	testDBName = "testDBName"
 )
 
+type DatabaseSetupTestSuite struct {
+	suite.Suite
+}
+
 type DatabaseTestSuite struct {
 	suite.Suite
 	handler *databaseHandler
 }
 
-func TestDatabaseConnection(t *testing.T) {
-	assert := assert.New(t)
+func (setupSuite *DatabaseSetupTestSuite) TestConnection() {
 	handler, err := newDatabaseHandler(testDBURL, testDBName)
-	if assert.NoError(err) {
-		assert.NotNil(handler)
+	if setupSuite.NoError(err) {
+		setupSuite.NotNil(handler)
 	}
-	assert.NoError(handler.start())
+	setupSuite.NoError(handler.start())
+}
+
+func (setupSuite *DatabaseSetupTestSuite) TestAttach() {
+	handler, err := newDatabaseHandler(testDBURL, testDBName)
+	if setupSuite.NoError(err) {
+		setupSuite.NotNil(handler)
+	}
+}
+
+func TestDatabaseSetup(t *testing.T) {
+	suite.Run(t, new(DatabaseSetupTestSuite))
 }

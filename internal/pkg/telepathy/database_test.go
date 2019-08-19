@@ -1,6 +1,7 @@
 package telepathy
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -25,7 +26,7 @@ func (setupSuite *DatabaseSetupTestSuite) TestConnection() {
 	if setupSuite.NoError(err) {
 		setupSuite.NotNil(handler)
 	}
-	setupSuite.NoError(handler.start())
+	setupSuite.NoError(handler.start(context.Background()))
 }
 
 func (setupSuite *DatabaseSetupTestSuite) TestAttach() {
@@ -33,6 +34,29 @@ func (setupSuite *DatabaseSetupTestSuite) TestAttach() {
 	if setupSuite.NoError(err) {
 		setupSuite.NotNil(handler)
 	}
+	reqCh := make(chan DatabaseRequest)
+	handler.attachRequester("testReq", reqCh)
+	reqChOther := make(chan DatabaseRequest)
+	handler.attachRequester("testReqOther", reqChOther)
+	dbDone := make(chan interface{})
+	go func() {
+		setupSuite.NoError(handler.start(context.Background()))
+		close(dbDone)
+	}()
+	close(reqCh)
+	close(reqChOther)
+	<-dbDone
+}
+
+func (setupSuite *DatabaseSetupTestSuite) TestAttachDuplicate() {
+	handler, err := newDatabaseHandler(testDBURL, testDBName)
+	if setupSuite.NoError(err) {
+		setupSuite.NotNil(handler)
+	}
+	reqCh := make(chan DatabaseRequest)
+	handler.attachRequester("testReq", reqCh)
+	reqChOther := make(chan DatabaseRequest)
+	setupSuite.Panics(func() { handler.attachRequester("testReq", reqChOther) })
 }
 
 func TestDatabaseSetup(t *testing.T) {

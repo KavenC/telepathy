@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/patrickmn/go-cache"
+
 	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/mongodb/mongo-go-driver/mongo/options"
@@ -52,6 +54,7 @@ type Service struct {
 	notifCtx    context.Context
 	notifCancel context.CancelFunc
 	notifDone   chan interface{}
+	notifPrevID *cache.Cache
 
 	// Sub renew routine
 	renewCtx       context.Context // context controls all websub renewal routines
@@ -90,6 +93,7 @@ func (s *Service) Start() {
 	s.notifQueue = make(chan *notification, 10)
 	s.notifCtx, s.notifCancel = context.WithCancel(context.Background())
 	s.notifDone = make(chan interface{})
+	s.notifPrevID = cache.New(time.Minute, -1)
 
 	s.renewCtx, s.renewCancel = context.WithCancel(context.Background())
 

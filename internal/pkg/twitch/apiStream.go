@@ -42,20 +42,16 @@ type streamQuery struct {
 
 func (t *twitchAPI) printStream(ctx context.Context, stream Stream, userLogin string) string {
 	if !stream.offline {
-		game := <-t.gameByID(ctx, stream.GameID)
-		var gameName string
-		if game == nil {
-			gameName = stream.GameID
-		} else {
-			gameName = game.Name
-		}
+		getGame := t.gameByID(ctx, stream.GameID)
 
-		return fmt.Sprintf(`- Streamer: %s (%s)
-- Title: %s
-- Playing: %s
-- Viewer Count: %d
-- Link: %s`, stream.UserName, userLogin, stream.Title,
-			gameName, stream.ViewerCount, twitchURL+userLogin)
+		retStr := strings.Builder{}
+		fmt.Fprintf(&retStr, "- Streamer: %s (%s)\n- Title: %s", stream.UserName, userLogin, stream.Title)
+		game := <-getGame
+		if game != nil {
+			fmt.Fprintf(&retStr, "\n- Playing: %s", game.Name)
+		}
+		fmt.Fprintf(&retStr, "\n- Viewer Count: %d\n- Link: %s", stream.ViewerCount, twitchURL+userLogin)
+		return retStr.String()
 	}
 	return "offline"
 }

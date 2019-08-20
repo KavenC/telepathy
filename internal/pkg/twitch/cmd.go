@@ -59,7 +59,7 @@ func (s *Service) Command(done <-chan interface{}) *argo.Action {
 	return cmd
 }
 
-const reqTimeOut = 5 * time.Second
+const reqTimeOut = 10 * time.Second
 
 func (s *Service) subStream(state *argo.State, extraArgs ...interface{}) error {
 	userLogin := state.Args()[0]

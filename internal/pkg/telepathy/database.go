@@ -27,6 +27,7 @@ type databaseHandler struct {
 	dbName       string
 	client       *mongo.Client
 	database     *mongo.Database
+	timeout      time.Duration
 	reqQueue     chan DatabaseRequest
 	requesterMap map[string]<-chan DatabaseRequest
 	logger       *logrus.Entry
@@ -44,6 +45,7 @@ func newDatabaseHandler(mongourl string, dbname string) (*databaseHandler, error
 	handler.reqQueue = make(chan DatabaseRequest, dBReqLen)
 	handler.logger = logger
 	handler.requesterMap = make(map[string]<-chan DatabaseRequest)
+	handler.timeout = dBTimeout
 
 	return &handler, nil
 }
@@ -73,7 +75,7 @@ func (h *databaseHandler) worker(ctx context.Context) {
 	}()
 
 	for request := range h.reqQueue {
-		timeout, cancel := context.WithTimeout(ctx, dBTimeout)
+		timeout, cancel := context.WithTimeout(ctx, h.timeout)
 		done := make(chan interface{})
 		go func() {
 			ret := request.Action(timeout, h.database)
@@ -91,7 +93,7 @@ func (h *databaseHandler) worker(ctx context.Context) {
 }
 
 func (h *databaseHandler) start(ctx context.Context) error {
-	timeCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	timeCtx, cancel := context.WithTimeout(ctx, h.timeout)
 	err := h.client.Connect(timeCtx)
 	cancel()
 	if err != nil {
@@ -102,7 +104,7 @@ func (h *databaseHandler) start(ctx context.Context) error {
 	h.logger.Infof("started. Database name: %s", h.dbName)
 	h.worker(ctx)
 
-	timeCtx, cancel = context.WithTimeout(ctx, time.Minute)
+	timeCtx, cancel = context.WithTimeout(ctx, h.timeout)
 	err = h.client.Disconnect(timeCtx)
 	cancel()
 	if err != nil {

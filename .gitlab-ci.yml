@@ -32,4 +32,4 @@ telepathy:
   services:
     - mongo:latest
   script:
-    - go test -v -timeout 10s -race $REPO_NAME/internal/pkg/telepathy
+    - go test -v -timeout 30s $REPO_NAME/internal/pkg/telepathy

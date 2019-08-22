@@ -40,10 +40,6 @@ var validSubType = map[string]bool{
 
 // Messenger defines the plugin structure
 type Messenger struct {
-	telepathy.Plugin
-	telepathy.PluginMessenger
-	telepathy.PluginWebhookHandler
-	telepathy.PluginDatabaseUser
 	SigningSecret []byte
 	ClientID      string
 	ClientSecret  string

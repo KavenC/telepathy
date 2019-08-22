@@ -46,7 +46,7 @@ func newRouter() *router {
 		cmdOut:         make(chan InboundMessage, routerCmdLen),
 		logger:         logrus.WithField("module", "router"),
 	}
-	cmd := newCmdManager(rt.cmdOut)
+	cmd := newCmdManager("teru", 10, 5*time.Second, rt.cmdOut)
 	rt.attachProducer("telepathy.cmd", cmd.msgOut)
 	rt.cmd = cmd
 	return rt

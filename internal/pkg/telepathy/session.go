@@ -2,6 +2,7 @@ package telepathy
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"sync"
 	"time"
@@ -13,7 +14,7 @@ import (
 type Session struct {
 	ctx       context.Context
 	db        *databaseHandler
-	webServer httpServer
+	webServer *httpServer
 	router    *router
 	plugins   map[string]Plugin
 	done      chan interface{}
@@ -31,9 +32,8 @@ type SessionConfig struct {
 // NewSession creates a new Telepathy session
 func NewSession(config SessionConfig, plugins []Plugin) (*Session, error) {
 	session := Session{
-		webServer: httpServer{},
-		plugins:   make(map[string]Plugin),
-		logger:    logrus.WithField("module", "session"),
+		plugins: make(map[string]Plugin),
+		logger:  logrus.WithField("module", "session"),
 	}
 
 	session.logger.Info("initializing")
@@ -41,10 +41,7 @@ func NewSession(config SessionConfig, plugins []Plugin) (*Session, error) {
 	var err error
 	// initialize backend services
 	// Init webserver
-	if err != nil {
-		return nil, err
-	}
-	err = session.webServer.init(config.RootURL, config.Port)
+	session.webServer, err = newWebServer(config.RootURL, config.Port)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +64,11 @@ func NewSession(config SessionConfig, plugins []Plugin) (*Session, error) {
 	}
 
 	// install internal plugins
-	session.plugins["telepathy.channel"] = &channelService{}
+	chPlugin := &channelService{}
+	if _, ok := session.plugins[chPlugin.ID()]; ok {
+		return nil, fmt.Errorf("Invalid Plugin ID: %s", chPlugin.ID())
+	}
+	session.plugins[chPlugin.ID()] = chPlugin
 
 	session.initPlugin()
 

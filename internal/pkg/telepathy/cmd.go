@@ -68,13 +68,13 @@ func (m *cmdManager) isCmdMsg(text string) bool {
 	return strings.HasPrefix(text, m.cmdRoot.Trigger+" ")
 }
 
-func (m *cmdManager) worker(id uint) {
+func (m *cmdManager) worker(ctx context.Context, id uint) {
 	logger := m.logger.WithField("worker", fmt.Sprint(id))
 
 	// worker function for handling command messages
 	for msg := range m.cmdIn {
 		args := regexCmdSplitter.Split(msg.Text, -1)
-		timeout, cancel := context.WithTimeout(context.Background(), m.timeout)
+		timeout, cancel := context.WithTimeout(ctx, m.timeout)
 		done := make(chan interface{})
 
 		go func() {
@@ -112,13 +112,13 @@ func (m *cmdManager) worker(id uint) {
 	}
 }
 
-func (m *cmdManager) start() {
+func (m *cmdManager) start(ctx context.Context) {
 	m.cmdRoot.Finalize()
 	wg := sync.WaitGroup{}
 	wg.Add(int(m.workerNum))
 	for id := uint(0); id < m.workerNum; id++ {
 		go func(id uint) {
-			m.worker(id)
+			m.worker(ctx, id)
 			wg.Done()
 		}(id)
 	}

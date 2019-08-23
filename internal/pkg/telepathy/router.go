@@ -188,11 +188,11 @@ func (r *router) transmitter() {
 	logger.Info("terminated")
 }
 
-func (r *router) start() {
+func (r *router) start(ctx context.Context) {
 	wg := sync.WaitGroup{}
 	wg.Add(3)
 	go func() {
-		r.cmd.start()
+		r.cmd.start(ctx)
 		wg.Done()
 	}()
 	go func() {

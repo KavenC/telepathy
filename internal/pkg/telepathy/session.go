@@ -95,7 +95,10 @@ func (s *Session) initPlugin() {
 		}
 
 		if pcmd, ok := p.(PluginCommandHandler); ok {
-			s.router.cmd.attachCommandInterface(pcmd.Command(s.router.cmd.done))
+			err := s.router.cmd.attachCommandInterface(pcmd.Command(s.router.cmd.done))
+			if err != nil {
+				logger.WithField("plugin", p.ID()).Panicf(err.Error())
+			}
 		}
 
 		if pwebh, ok := p.(PluginWebhookHandler); ok {

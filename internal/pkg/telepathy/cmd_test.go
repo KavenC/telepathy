@@ -137,3 +137,23 @@ func TestCmdReturnError(t *testing.T) {
 	close(cmdCh)
 	<-cmdMgr.done
 }
+
+func TestCmdDuplicated(t *testing.T) {
+	assert := assert.New(t)
+	cmdCh := make(chan InboundMessage)
+	cmdMgr := newCmdManager("test", 3, time.Second, cmdCh)
+
+	subCmd := &argo.Action{Trigger: "subcmd"}
+	dupCmd := &argo.Action{Trigger: "subcmd"}
+
+	err := cmdMgr.attachCommandInterface(subCmd)
+	assert.NoError(err)
+	err = cmdMgr.attachCommandInterface(dupCmd)
+	assert.Error(err)
+	_, ok := err.(argo.DuplicatedSubActionError)
+	assert.True(ok)
+
+	go cmdMgr.start(context.Background())
+	close(cmdCh)
+	<-cmdMgr.done
+}

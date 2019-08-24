@@ -59,9 +59,13 @@ func newCmdManager(prefix string, workerNum uint, timeout time.Duration, cmdMsgC
 	}
 }
 
-func (m *cmdManager) attachCommandInterface(cmd *argo.Action) {
-	m.cmdRoot.AddSubAction(*cmd)
+func (m *cmdManager) attachCommandInterface(cmd *argo.Action) error {
+	err := m.cmdRoot.AddSubAction(*cmd)
+	if err != nil {
+		return err
+	}
 	m.logger.Infof("attached command: %s", cmd.Trigger)
+	return nil
 }
 
 func (m *cmdManager) isCmdMsg(text string) bool {

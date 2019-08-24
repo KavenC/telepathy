@@ -2,6 +2,7 @@ package telepathy
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"sync"
 	"time"
@@ -13,7 +14,7 @@ import (
 type Session struct {
 	ctx       context.Context
 	db        *databaseHandler
-	webServer httpServer
+	webServer *httpServer
 	router    *router
 	plugins   map[string]Plugin
 	done      chan interface{}
@@ -31,9 +32,8 @@ type SessionConfig struct {
 // NewSession creates a new Telepathy session
 func NewSession(config SessionConfig, plugins []Plugin) (*Session, error) {
 	session := Session{
-		webServer: httpServer{},
-		plugins:   make(map[string]Plugin),
-		logger:    logrus.WithField("module", "session"),
+		plugins: make(map[string]Plugin),
+		logger:  logrus.WithField("module", "session"),
 	}
 
 	session.logger.Info("initializing")
@@ -41,10 +41,7 @@ func NewSession(config SessionConfig, plugins []Plugin) (*Session, error) {
 	var err error
 	// initialize backend services
 	// Init webserver
-	if err != nil {
-		return nil, err
-	}
-	err = session.webServer.init(config.RootURL, config.Port)
+	session.webServer, err = newWebServer(config.RootURL, config.Port)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +64,11 @@ func NewSession(config SessionConfig, plugins []Plugin) (*Session, error) {
 	}
 
 	// install internal plugins
-	session.plugins["telepathy.channel"] = &channelService{}
+	chPlugin := &channelService{}
+	if _, ok := session.plugins[chPlugin.ID()]; ok {
+		return nil, fmt.Errorf("Invalid Plugin ID: %s", chPlugin.ID())
+	}
+	session.plugins[chPlugin.ID()] = chPlugin
 
 	session.initPlugin()
 
@@ -94,7 +95,10 @@ func (s *Session) initPlugin() {
 		}
 
 		if pcmd, ok := p.(PluginCommandHandler); ok {
-			s.router.cmd.attachCommandInterface(pcmd.Command(s.router.cmd.done))
+			err := s.router.cmd.attachCommandInterface(pcmd.Command(s.router.cmd.done))
+			if err != nil {
+				logger.WithField("plugin", p.ID()).Panicf(err.Error())
+			}
 		}
 
 		if pwebh, ok := p.(PluginWebhookHandler); ok {
@@ -124,18 +128,19 @@ func (s *Session) initPlugin() {
 }
 
 // Start starts a Telepathy session
-// The function always returns an error when the seesion is terminated
-func (s *Session) Start() {
+func (s *Session) Start(ctx context.Context) {
 	s.done = make(chan interface{})
-	// Start backend services
-	s.logger.Info("starting backend services")
+
 	wgBackend := sync.WaitGroup{}
-	startBackend := func(f func()) {
+	// Start database
+	go func() {
 		wgBackend.Add(1)
-		f()
+		err := s.db.start(ctx)
+		if err != nil {
+			s.db.logger.Errorf(err.Error())
+		}
 		wgBackend.Done()
-	}
-	go startBackend(s.db.start)
+	}()
 
 	// Start plugins
 	wgPlugin := sync.WaitGroup{}
@@ -151,7 +156,7 @@ func (s *Session) Start() {
 	// Start router
 	go func() {
 		wgBackend.Add(1)
-		s.router.start()
+		s.router.start(ctx, 5*time.Second, 5*time.Second)
 		wgBackend.Done()
 	}()
 

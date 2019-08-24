@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,14 +13,12 @@ import (
 )
 
 const (
-	cmdPrefix    = "teru"
-	cmdWorkerNum = 10
 	cmdMsgOutLen = 5
-	cmdTimeout   = time.Second * 2
 )
 
 // CmdExtraArgs carries extra info for command handlers
 type CmdExtraArgs struct {
+	Prefix  string
 	Ctx     context.Context
 	Message InboundMessage
 }
@@ -37,48 +34,57 @@ type commandHandler struct {
 }
 
 type cmdManager struct {
-	cmdRoot argo.Action
-	cmdIn   <-chan InboundMessage
-	msgOut  chan OutboundMessage
-	done    chan interface{}
-	logger  *logrus.Entry
+	cmdRoot   argo.Action
+	cmdIn     <-chan InboundMessage
+	msgOut    chan OutboundMessage
+	workerNum uint
+	timeout   time.Duration
+	done      chan interface{}
+	logger    *logrus.Entry
 }
 
 var regexCmdSplitter = regexp.MustCompile(" +")
 
-func newCmdManager(inCh <-chan InboundMessage) *cmdManager {
+func newCmdManager(prefix string, workerNum uint, timeout time.Duration, cmdMsgCh <-chan InboundMessage) *cmdManager {
 	return &cmdManager{
 		cmdRoot: argo.Action{
-			Trigger: cmdPrefix,
+			Trigger: prefix,
 		},
-		cmdIn:  inCh,
-		msgOut: make(chan OutboundMessage, cmdMsgOutLen),
-		done:   make(chan interface{}),
-		logger: logrus.WithField("module", "cmdManager"),
+		cmdIn:     cmdMsgCh,
+		msgOut:    make(chan OutboundMessage, cmdMsgOutLen),
+		workerNum: workerNum,
+		timeout:   timeout,
+		done:      make(chan interface{}),
+		logger:    logrus.WithField("module", "cmdManager"),
 	}
 }
 
-func (m *cmdManager) attachCommandInterface(cmd *argo.Action) {
-	m.cmdRoot.AddSubAction(*cmd)
+func (m *cmdManager) attachCommandInterface(cmd *argo.Action) error {
+	err := m.cmdRoot.AddSubAction(*cmd)
+	if err != nil {
+		return err
+	}
 	m.logger.Infof("attached command: %s", cmd.Trigger)
+	return nil
 }
 
 func (m *cmdManager) isCmdMsg(text string) bool {
-	return strings.HasPrefix(text, cmdPrefix+" ")
+	return strings.HasPrefix(text, m.cmdRoot.Trigger+" ")
 }
 
-func (m *cmdManager) worker(id int) {
-	logger := m.logger.WithField("worker", strconv.Itoa(id))
+func (m *cmdManager) worker(ctx context.Context, id uint) {
+	logger := m.logger.WithField("worker", fmt.Sprint(id))
 
 	// worker function for handling command messages
 	for msg := range m.cmdIn {
 		args := regexCmdSplitter.Split(msg.Text, -1)
-		timeout, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		timeout, cancel := context.WithTimeout(ctx, m.timeout)
 		done := make(chan interface{})
 
 		go func() {
 			state := argo.State{}
 			err := m.cmdRoot.Parse(&state, args, CmdExtraArgs{
+				Prefix:  m.cmdRoot.Trigger,
 				Message: msg,
 				Ctx:     timeout,
 			})
@@ -110,18 +116,18 @@ func (m *cmdManager) worker(id int) {
 	}
 }
 
-func (m *cmdManager) start() {
+func (m *cmdManager) start(ctx context.Context) {
 	m.cmdRoot.Finalize()
 	wg := sync.WaitGroup{}
-	wg.Add(cmdWorkerNum)
-	for id := 0; id < cmdWorkerNum; id++ {
-		go func(id int) {
-			m.worker(id)
+	wg.Add(int(m.workerNum))
+	for id := uint(0); id < m.workerNum; id++ {
+		go func(id uint) {
+			m.worker(ctx, id)
 			wg.Done()
 		}(id)
 	}
 
-	m.logger.Infof("started worker: %d", cmdWorkerNum)
+	m.logger.Infof("started worker: %d", m.workerNum)
 	wg.Wait()
 	close(m.done)
 	close(m.msgOut)
@@ -135,9 +141,4 @@ func CommandEnsureDM(state *argo.State, extraArgs CmdExtraArgs) bool {
 		return false
 	}
 	return true
-}
-
-// CommandPrefix returns command triggering keyword
-func CommandPrefix() string {
-	return cmdPrefix
 }

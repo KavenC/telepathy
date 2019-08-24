@@ -27,6 +27,7 @@ type databaseHandler struct {
 	dbName       string
 	client       *mongo.Client
 	database     *mongo.Database
+	timeout      time.Duration
 	reqQueue     chan DatabaseRequest
 	requesterMap map[string]<-chan DatabaseRequest
 	logger       *logrus.Entry
@@ -44,6 +45,7 @@ func newDatabaseHandler(mongourl string, dbname string) (*databaseHandler, error
 	handler.reqQueue = make(chan DatabaseRequest, dBReqLen)
 	handler.logger = logger
 	handler.requesterMap = make(map[string]<-chan DatabaseRequest)
+	handler.timeout = dBTimeout
 
 	return &handler, nil
 }
@@ -55,7 +57,7 @@ func (h *databaseHandler) attachRequester(id string, ch <-chan DatabaseRequest) 
 	h.requesterMap[id] = ch
 }
 
-func (h *databaseHandler) worker() {
+func (h *databaseHandler) worker(ctx context.Context) {
 	wg := sync.WaitGroup{}
 	wg.Add(len(h.requesterMap))
 	for _, reqCh := range h.requesterMap {
@@ -73,7 +75,7 @@ func (h *databaseHandler) worker() {
 	}()
 
 	for request := range h.reqQueue {
-		timeout, cancel := context.WithTimeout(context.Background(), dBTimeout)
+		timeout, cancel := context.WithTimeout(ctx, h.timeout)
 		done := make(chan interface{})
 		go func() {
 			ret := request.Action(timeout, h.database)
@@ -83,31 +85,31 @@ func (h *databaseHandler) worker() {
 
 		select {
 		case <-timeout.Done():
-			h.logger.Warnf("request timeout")
+			h.logger.Warnf("request timeout/cancelled")
 		case <-done:
 		}
 		cancel()
 	}
 }
 
-func (h *databaseHandler) start() {
-	timeCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+func (h *databaseHandler) start(ctx context.Context) error {
+	timeCtx, cancel := context.WithTimeout(ctx, h.timeout)
 	err := h.client.Connect(timeCtx)
 	cancel()
 	if err != nil {
-		h.logger.Errorf("failed to connect to MongoDB: %s", err.Error())
-		return
+		return err
 	}
 
 	h.database = h.client.Database(h.dbName)
 	h.logger.Infof("started. Database name: %s", h.dbName)
+	h.worker(ctx)
 
-	h.worker()
-
-	err = h.client.Disconnect(context.Background())
+	timeCtx, cancel = context.WithTimeout(ctx, h.timeout)
+	err = h.client.Disconnect(timeCtx)
+	cancel()
 	if err != nil {
-		h.logger.Errorf("failed to disconnect: %s", err.Error())
+		return err
 	}
 	h.logger.Info("terminated")
-	return
+	return nil
 }

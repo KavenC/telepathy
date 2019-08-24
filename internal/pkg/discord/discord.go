@@ -24,8 +24,6 @@ const (
 
 // Messenger is the main discord plugin structure
 type Messenger struct {
-	telepathy.Plugin
-	telepathy.PluginMessenger
 	Token         string
 	stopListening func()
 	bot           *discordgo.Session

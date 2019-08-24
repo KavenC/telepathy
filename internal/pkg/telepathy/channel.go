@@ -14,8 +14,6 @@ const channelDelimiter = "@"
 const channelServiceID = "telepathy.channel"
 
 type channelService struct {
-	Plugin
-	PluginCommandHandler
 	logger *logrus.Entry
 }
 

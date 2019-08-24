@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
@@ -53,17 +54,20 @@ func main() {
 
 	// Start Telepathy session
 	sessionEnd := make(chan interface{})
+	ctx := context.Background()
 	go func() {
-		session.Start()
+		session.Start(ctx)
 		close(sessionEnd)
 	}()
 
 	// Catch termination interrupts
-	sc := make(chan os.Signal, 1)
+	sc := make(chan os.Signal)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
 
 	logrus.Info("terminating")
 	session.Stop()
+
+	// TODO: if session stop timeouts, cancel context and see who are the blockers
 	<-sessionEnd
 }

@@ -30,9 +30,6 @@ type InitError struct {
 
 // Messenger implements the communication with Line APP
 type Messenger struct {
-	telepathy.Plugin
-	telepathy.PluginMessenger
-	telepathy.PluginWebhookHandler
 	Secret        string
 	Token         string
 	inMsgChannel  chan telepathy.InboundMessage

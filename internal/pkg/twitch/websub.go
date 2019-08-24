@@ -118,6 +118,7 @@ func (s *Service) notifHandler() {
 			logger.Warnf("notification without ID")
 			logger.Warn(notification.request.Header)
 			logger.Warn(notification.body)
+			ret <- 200
 			continue
 		}
 
@@ -125,6 +126,7 @@ func (s *Service) notifHandler() {
 		if err != nil {
 			// skip duplicated notifications
 			logger.Warnf("duplicated notif ID: %s", notifID)
+			ret <- 200
 			continue
 		}
 		s.notifPrevID.DeleteExpired()

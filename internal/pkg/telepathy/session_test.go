@@ -276,7 +276,6 @@ func TestSessionCtxCmd(t *testing.T) {
 		Do: func(state *argo.State, extraArgs ...interface{}) error {
 			extra, _ := extraArgs[0].(telepathy.CmdExtraArgs)
 			<-extra.Ctx.Done()
-			state.OutputStr.WriteString("success")
 			return nil
 		},
 	})
@@ -302,8 +301,7 @@ func TestSessionCtxCmd(t *testing.T) {
 	}
 
 	go func() {
-		msg := <-pluginMsgr.outMsgChannel
-		assert.Equal("success", msg.Text)
+		<-pluginMsgr.outMsgChannel
 		wg.Done()
 	}()
 	cancel()

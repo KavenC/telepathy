@@ -157,3 +157,50 @@ func TestCmdDuplicated(t *testing.T) {
 	close(cmdCh)
 	<-cmdMgr.done
 }
+
+func TestCmdEnsureDM(t *testing.T) {
+	assert := assert.New(t)
+	cmdCh := make(chan InboundMessage)
+	cmdMgr := newCmdManager("test", 1, time.Second, cmdCh)
+
+	subCmd := &argo.Action{Trigger: "subcmd"}
+	subCmd.AddSubAction(argo.Action{
+		Trigger: "act",
+		Do: func(state *argo.State, extras ...interface{}) error {
+			extraArgs, _ := extras[0].(CmdExtraArgs)
+			if extraArgs.Message.IsDirectMessage {
+				assert.True(CommandEnsureDM(state, extraArgs))
+				state.OutputStr.WriteString("output test")
+			} else {
+				assert.False(CommandEnsureDM(state, extraArgs))
+			}
+			return nil
+		},
+	})
+
+	cmdMgr.attachCommandInterface(subCmd)
+	go cmdMgr.start(context.Background())
+	fromCh := Channel{
+		MessengerID: "msg",
+		ChannelID:   "ch",
+	}
+	dmMsg := InboundMessage{
+		FromChannel:     fromCh,
+		Text:            "test subcmd act",
+		IsDirectMessage: true,
+	}
+	nonDmMsg := InboundMessage{
+		FromChannel:     fromCh,
+		Text:            "test subcmd act",
+		IsDirectMessage: false,
+	}
+	cmdCh <- dmMsg
+	cmdCh <- nonDmMsg
+	outMsg := <-cmdMgr.msgOut
+	assert.Equal("output test", outMsg.Text)
+	outMsg = <-cmdMgr.msgOut
+	assert.Contains(outMsg.Text, "Direct Messages")
+
+	close(cmdCh)
+	<-cmdMgr.done
+}

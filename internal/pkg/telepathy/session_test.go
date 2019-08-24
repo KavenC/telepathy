@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mongodb/mongo-go-driver/bson"
+	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 
@@ -106,22 +108,23 @@ func newSessionConfig() *telepathy.SessionConfig {
 	}
 }
 
-func TestSessionSimpleUsage(t *testing.T) {
+func TestSessionIntegration(t *testing.T) {
 	assert := assert.New(t)
 	config := newSessionConfig()
 	pluginMsgr := testMessenger{id: "MSGR"}
 	pluginMsgr.webhooks = make(map[string]telepathy.HTTPHandler)
+	fromCh := telepathy.Channel{
+		MessengerID: "MSGR",
+		ChannelID:   "WEBHOOK",
+	}
 	pluginMsgr.webhooks["test-hook"] = func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(200)
 		bodyByte, err := ioutil.ReadAll(req.Body)
 		req.Body.Close()
 		assert.NoError(err)
 		pluginMsgr.inMsgChannel <- telepathy.InboundMessage{
-			FromChannel: telepathy.Channel{
-				MessengerID: "MSGR",
-				ChannelID:   "WEBHOOK",
-			},
-			Text: string(bodyByte),
+			FromChannel: fromCh,
+			Text:        string(bodyByte),
 		}
 	}
 
@@ -146,6 +149,7 @@ func TestSessionSimpleUsage(t *testing.T) {
 		close(done)
 	}()
 
+	// Webhook -> Msgr -> Cmd -> SVC -> OutMsg
 	resp, err := http.Post(pluginMsgr.urls["test-hook"].String(), "text/plain",
 		strings.NewReader("teru svc act"))
 	assert.NoError(err)
@@ -153,6 +157,66 @@ func TestSessionSimpleUsage(t *testing.T) {
 
 	msg := <-pluginMsgr.outMsgChannel
 	assert.Equal("success", msg.Text)
+
+	// Webhook -> Msgr -> SVC -> OutMsg
+	resp, err = http.Post(pluginMsgr.urls["test-hook"].String(), "text/plain",
+		strings.NewReader("random text"))
+	assert.NoError(err)
+	assert.Equal(200, resp.StatusCode)
+	inMsg := <-pluginSvc.inMsgChannel
+	assert.Equal("random text", inMsg.Text)
+	assert.Equal(fromCh, inMsg.FromChannel)
+
+	// DB Req
+	testVal := "dbTest"
+	retCh := make(chan interface{})
+	pluginSvc.dbChannel <- telepathy.DatabaseRequest{
+		Action: func(ctx context.Context, db *mongo.Database) interface{} {
+			collection := db.Collection("testCollection")
+			_, err := collection.InsertOne(ctx, bson.M{"Key": testVal})
+			assert.NoError(err)
+			return testVal
+		},
+		Return: retCh,
+	}
+	ret := <-retCh
+	close(retCh)
+	value, ok := ret.(string)
+	assert.True(ok)
+
+	retCh = make(chan interface{})
+	pluginSvc.dbChannel <- telepathy.DatabaseRequest{
+		Action: func(ctx context.Context, db *mongo.Database) interface{} {
+			collection := db.Collection("testCollection")
+			result := collection.FindOne(ctx, map[string]string{"Key": value})
+			if !assert.NoError(result.Err()) {
+				return ""
+			}
+			raw, err := result.DecodeBytes()
+			if !assert.NoError(err) {
+				return ""
+			}
+			readValue, err := raw.LookupErr("Key")
+			if !assert.NoError(err) {
+				return ""
+			}
+			ret, ok := readValue.StringValueOK()
+			if !assert.True(ok) {
+				return ""
+			}
+			delResult, err := collection.DeleteMany(ctx, map[string]string{"Key": value})
+			assert.NoError(err)
+			assert.Equal(int64(1), delResult.DeletedCount)
+			return ret
+		},
+		Return: retCh,
+	}
+
+	ret = <-retCh
+	close(retCh)
+	value, ok = ret.(string)
+	assert.True(ok)
+	assert.Equal(testVal, value)
 
 	session.Stop()
 	<-done

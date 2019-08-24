@@ -157,7 +157,7 @@ func (s *Session) Start(ctx context.Context) {
 	// Start router
 	go func() {
 		wgBackend.Add(1)
-		s.router.start(ctx)
+		s.router.start(ctx, 5*time.Second, 5*time.Second)
 		wgBackend.Done()
 	}()
 

@@ -9,13 +9,11 @@ import (
 )
 
 const (
-	routerRecvOutLen     = 1
-	routerTranOutLen     = 1
-	routerRecvHandleLen  = 1
-	routerTranHandleLen  = 1
-	routerCmdLen         = 10
-	routerRecvOutTimeout = time.Second * 5
-	routerTranOutTimeout = time.Second * 5
+	routerRecvOutLen    = 1
+	routerTranOutLen    = 1
+	routerRecvHandleLen = 1
+	routerTranHandleLen = 1
+	routerCmdLen        = 10
 )
 
 // Router consists of receiver and transmitter parts
@@ -86,7 +84,7 @@ func (r *router) attachTransmitter(id string) <-chan OutboundMessage {
 	return r.transmitterOut[id]
 }
 
-func (r *router) receiver() {
+func (r *router) receiver(ctx context.Context, timeout time.Duration) {
 	logger := r.logger.WithField("phase", "receiver")
 	logger.Info("started")
 
@@ -120,7 +118,7 @@ func (r *router) receiver() {
 
 		// Forward message to all listeners
 		for id, ch := range r.receiverOut {
-			timeout, cancel := context.WithTimeout(context.Background(), routerRecvOutTimeout)
+			timeout, cancel := context.WithTimeout(ctx, timeout)
 			select {
 			case ch <- msg:
 			case <-timeout.Done():
@@ -140,7 +138,7 @@ func (r *router) receiver() {
 	logger.Info("terminated")
 }
 
-func (r *router) transmitter() {
+func (r *router) transmitter(ctx context.Context, timeout time.Duration) {
 	logger := r.logger.WithField("phase", "transmitter")
 	logger.Info("started")
 	wg := sync.WaitGroup{}
@@ -173,7 +171,7 @@ func (r *router) transmitter() {
 			continue
 		}
 
-		timeout, cancel := context.WithTimeout(context.Background(), routerTranOutTimeout)
+		timeout, cancel := context.WithTimeout(ctx, timeout)
 		select {
 		case ch <- msg:
 		case <-timeout.Done():
@@ -188,7 +186,7 @@ func (r *router) transmitter() {
 	logger.Info("terminated")
 }
 
-func (r *router) start(ctx context.Context) {
+func (r *router) start(ctx context.Context, recvTimeout time.Duration, transTimeout time.Duration) {
 	wg := sync.WaitGroup{}
 	wg.Add(3)
 	go func() {
@@ -196,11 +194,11 @@ func (r *router) start(ctx context.Context) {
 		wg.Done()
 	}()
 	go func() {
-		r.receiver()
+		r.receiver(ctx, recvTimeout)
 		wg.Done()
 	}()
 	go func() {
-		r.transmitter()
+		r.transmitter(ctx, transTimeout)
 		wg.Done()
 	}()
 

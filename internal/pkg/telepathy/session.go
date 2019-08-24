@@ -128,7 +128,6 @@ func (s *Session) initPlugin() {
 }
 
 // Start starts a Telepathy session
-// The function always returns an error when the seesion is terminated
 func (s *Session) Start(ctx context.Context) {
 	s.done = make(chan interface{})
 

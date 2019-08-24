@@ -2,6 +2,8 @@
 
 An universal messenger botting platform
 
+[![pipeline status](https://gitlab.com/kavenc/telepathy/badges/master/pipeline.svg)](https://gitlab.com/kavenc/telepathy/commits/master)
+
 ## Overview
 
 Telepathy implements an abstraction layer of messenger botting APIs.

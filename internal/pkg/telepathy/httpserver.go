@@ -16,18 +16,6 @@ const webhookRoot = "/webhook/"
 // HTTPHandler defines the callback function signature for Webhook handler
 type HTTPHandler func(http.ResponseWriter, *http.Request)
 
-// WebhookExistsError indicates a failure when registering Webhook
-// since the pattern is already registered
-type WebhookExistsError struct {
-	Pattern string
-}
-
-// WebhookInvalidError indicates a failure when registering Webhook
-// since the pattern does not comply naming rule
-type WebhookInvalidError struct {
-	Pattern string
-}
-
 type httpServer struct {
 	http.Server
 	uRL         *url.URL
@@ -38,8 +26,7 @@ func (server *httpServer) registerWebhook(pattern string, handler HTTPHandler) (
 	logger := logrus.WithField("module", "httpserv").WithField("webhook", pattern)
 
 	if !validHook.MatchString(pattern) {
-		logger.Errorf("illegal webhook name: %s", pattern)
-		return nil, WebhookInvalidError{Pattern: pattern}
+		return nil, fmt.Errorf("Pattern: %s is invalid", pattern)
 	}
 
 	if server.webhookList == nil {
@@ -47,8 +34,7 @@ func (server *httpServer) registerWebhook(pattern string, handler HTTPHandler) (
 	}
 
 	if _, ok := server.webhookList[pattern]; ok {
-		logger.Errorf("already registered: %s", pattern)
-		return nil, WebhookExistsError{Pattern: pattern}
+		return nil, fmt.Errorf("Pattern: %s has been registered", pattern)
 	}
 
 	server.webhookList[pattern] = handler
@@ -66,14 +52,15 @@ func (server *httpServer) serveMux() *http.ServeMux {
 	return &mux
 }
 
-func (server *httpServer) init(urlstr string, port string) error {
+func newWebServer(urlstr string, port string) (*httpServer, error) {
+	server := httpServer{}
 	var err error
 	server.uRL, err = url.Parse(urlstr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	server.Addr = ":" + port
-	return nil
+	return &server, nil
 }
 
 func (server *httpServer) finalize() {
@@ -90,12 +77,4 @@ func (server *httpServer) webhookURL() *url.URL {
 	copyURL, _ := url.Parse(server.uRL.String())
 	copyURL.Path = webhookRoot
 	return copyURL
-}
-
-func (e WebhookExistsError) Error() string {
-	return "Pattern: " + e.Pattern + " is already registered"
-}
-
-func (e WebhookInvalidError) Error() string {
-	return "Pattern: " + e.Pattern + " is invalid"
 }

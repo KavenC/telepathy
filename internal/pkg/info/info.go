@@ -7,7 +7,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"gitlab.com/kavenc/argo"
-	"gitlab.com/kavenc/telepathy/internal/pkg/telepathy"
 )
 
 const (
@@ -18,8 +17,6 @@ var version = "dev"
 
 // Service implements telepathy plugin interfaces
 type Service struct {
-	telepathy.Plugin
-	telepathy.PluginCommandHandler
 	logger *logrus.Entry
 }
 

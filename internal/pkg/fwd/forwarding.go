@@ -27,12 +27,6 @@ const (
 
 // Service defines the plugin structure
 type Service struct {
-	telepathy.Plugin
-	telepathy.PluginCommandHandler
-	telepathy.PluginMsgConsumer
-	telepathy.PluginMsgProducer
-	telepathy.PluginDatabaseUser
-
 	inMsg   <-chan telepathy.InboundMessage
 	outMsg  chan telepathy.OutboundMessage
 	dbReq   chan telepathy.DatabaseRequest

@@ -161,7 +161,7 @@ func (m *Service) setupFwd(state *argo.State, session Session, extraArgs telepat
 		return err
 	}
 
-	prefix := telepathy.CommandPrefix()
+	prefix := extraArgs.Prefix
 	state.OutputStr.WriteString("\nPlease follow these steps:\n")
 	state.OutputStr.WriteString("1. Make sure Telepathy is enabled in both channels\n")
 	fmt.Fprintf(&state.OutputStr, "2. Send: %s %s set %s to the 1st channel\n", prefix, funcKey, key1)

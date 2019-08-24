@@ -22,6 +22,7 @@ import (
 const (
 	twitchURL      = "https://www.twitch.tv/"
 	dbSyncInterval = 10 * time.Minute
+	notifIDTimeout = 5 * time.Minute
 )
 
 type notification struct {
@@ -93,7 +94,7 @@ func (s *Service) Start() {
 	s.notifQueue = make(chan *notification, 10)
 	s.notifCtx, s.notifCancel = context.WithCancel(context.Background())
 	s.notifDone = make(chan interface{})
-	s.notifPrevID = cache.New(time.Minute, -1)
+	s.notifPrevID = cache.New(notifIDTimeout, -1)
 
 	s.renewCtx, s.renewCancel = context.WithCancel(context.Background())
 

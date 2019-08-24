@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mongodb/mongo-go-driver/bson"
@@ -220,4 +221,93 @@ func TestSessionIntegration(t *testing.T) {
 
 	session.Stop()
 	<-done
+}
+
+func TestSessionCtxDatabase(t *testing.T) {
+	assert := assert.New(t)
+	config := newSessionConfig()
+	pluginMsgr := testMessenger{id: "MSGR"}
+	pluginSvc := testService{id: "SVC"}
+	cmd := argo.Action{Trigger: "svc"}
+	pluginSvc.cmd = &cmd
+
+	session, err := telepathy.NewSession(*config,
+		[]telepathy.Plugin{&pluginSvc, &pluginMsgr})
+	assert.NoError(err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		session.Start(ctx)
+		wg.Done()
+	}()
+
+	retCh := make(chan interface{})
+	pluginSvc.dbChannel <- telepathy.DatabaseRequest{
+		Action: func(ctx context.Context, db *mongo.Database) interface{} {
+			<-ctx.Done()
+			return "done"
+		},
+		Return: retCh,
+	}
+
+	go func() {
+		ret := <-retCh
+		close(retCh)
+		value, _ := ret.(string)
+		assert.Equal("done", value)
+		wg.Done()
+	}()
+	cancel()
+
+	session.Stop()
+	wg.Wait()
+}
+
+func TestSessionCtxCmd(t *testing.T) {
+	assert := assert.New(t)
+	config := newSessionConfig()
+	pluginMsgr := testMessenger{id: "MSGR"}
+	pluginSvc := testService{id: "SVC"}
+	cmd := argo.Action{Trigger: "svc"}
+	cmd.AddSubAction(argo.Action{
+		Trigger: "hang",
+		Do: func(state *argo.State, extraArgs ...interface{}) error {
+			extra, _ := extraArgs[0].(telepathy.CmdExtraArgs)
+			<-extra.Ctx.Done()
+			state.OutputStr.WriteString("success")
+			return nil
+		},
+	})
+	pluginSvc.cmd = &cmd
+
+	session, err := telepathy.NewSession(*config,
+		[]telepathy.Plugin{&pluginSvc, &pluginMsgr})
+	assert.NoError(err)
+
+	wg := sync.WaitGroup{}
+	ctx, cancel := context.WithCancel(context.Background())
+	wg.Add(2)
+	go func() {
+		session.Start(ctx)
+		wg.Done()
+	}()
+
+	pluginMsgr.inMsgChannel <- telepathy.InboundMessage{
+		FromChannel: telepathy.Channel{
+			MessengerID: "MSGR",
+		},
+		Text: "teru svc hang",
+	}
+
+	go func() {
+		msg := <-pluginMsgr.outMsgChannel
+		assert.Equal("success", msg.Text)
+		wg.Done()
+	}()
+	cancel()
+
+	session.Stop()
+	wg.Wait()
 }

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/patrickmn/go-cache"
 )
 
 type websubReq struct {
@@ -110,6 +112,24 @@ func (s *Service) notifHandler() {
 		req := notification.request
 		ret := notification.status
 		body := notification.body
+
+		notifID := notification.request.Header.Get("Twitch-Notification-Id")
+		if len(notifID) == 0 {
+			logger.Warnf("notification without ID")
+			logger.Warn(notification.request.Header)
+			logger.Warn(notification.body)
+			ret <- 200
+			continue
+		}
+
+		err := s.notifPrevID.Add(notifID, nil, cache.DefaultExpiration)
+		if err != nil {
+			// skip duplicated notifications
+			ret <- 200
+			continue
+		}
+		s.notifPrevID.DeleteExpired()
+
 		// A "topic" query is appended as callback url when subscribing
 		// Here we can use the "topic" query to identify the topic of this callback request
 		topic := req.URL.Query()["topic"]

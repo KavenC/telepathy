@@ -207,9 +207,10 @@ func (m *Messenger) createImgContent(bot *slack.Client, file slackevents.File) *
 }
 
 func (m *Messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
+	logger := m.logger.WithField("phase", "handleMessage")
 	info, ok := m.botInfoMap[teamID]
 	if !ok {
-		m.logger.Warnf("received from unknwon team: %s", teamID)
+		logger.Warnf("received from unknwon team: %s", teamID)
 		return
 	}
 
@@ -231,20 +232,25 @@ func (m *Messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
 		srcProfile.DisplayName = ev.Username
 	} else if ev.User != "" {
 		srcProfile.ID = ev.User
-		user, err := bot.GetUserInfo(ev.User)
-		if err == nil {
-			srcProfile.DisplayName = user.Profile.DisplayName
-		} else {
-			m.logger.WithField("user", ev.User).Warnf("get user failed: %s", err.Error())
+
+		// Workaround for issue #19
+		retryCount := 3
+		for try := 1; try <= retryCount; try++ {
+			user, err := bot.GetUserInfo(ev.User)
+			if err == nil {
+				srcProfile.DisplayName = user.Profile.DisplayName
+				break
+			}
+			logger.WithField("user", ev.User).Warnf("get user failed (%d/%d): %s", try, retryCount, err.Error())
 		}
 	} else {
-		m.logger.Warnf("unknown message: %+v", ev)
+		logger.Warnf("unknown message: %+v", ev)
 		return
 	}
 
 	uniqueChannelID, err := unqiueChannel{TeamID: teamID, ChannelID: ev.Channel}.encode()
 	if err != nil {
-		m.logger.Errorf("failed to create uniqueChannel: %s", err.Error())
+		logger.Errorf("failed to create uniqueChannel: %s", err.Error())
 		return
 	}
 	message := telepathy.InboundMessage{

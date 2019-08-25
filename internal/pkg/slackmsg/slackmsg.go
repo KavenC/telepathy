@@ -113,17 +113,18 @@ func (m *Messenger) DBRequestChannel() <-chan telepathy.DatabaseRequest {
 }
 
 func (m *Messenger) transmitter() {
+	logger := m.logger.WithField("phase", "transmitter")
 	for message := range m.outMsg {
 		chID := message.ToChannel.ChannelID
 		channel, err := newUniqueChannel(chID)
 		if err != nil {
-			m.logger.WithField("phase", "send").Errorf("invalid target ID: %s (%s)", chID, err.Error())
+			logger.Errorf("invalid target ID: %s (%s)", chID, err.Error())
 			continue
 		}
 
 		info, ok := m.botInfoMap[channel.TeamID]
 		if !ok {
-			m.logger.WithField("phase", "send").Errorf("unauthorized team: %s", channel.TeamID)
+			logger.Errorf("unauthorized team: %s", channel.TeamID)
 			continue
 		}
 
@@ -139,7 +140,7 @@ func (m *Messenger) transmitter() {
 					text.WriteString(imgURL)
 				}
 			} else {
-				m.logger.Warnf("image get FullURL failed: %s", err.Error())
+				logger.Warnf("image get FullURL failed: %s", err.Error())
 			}
 		}
 
@@ -180,7 +181,7 @@ func (m *Messenger) verifyRequest(header http.Header, body []byte) bool {
 	expectedMac := fmt.Sprintf("v0=%s", hex.EncodeToString(mac.Sum(nil)))
 
 	if subtle.ConstantTimeCompare([]byte(checkMac[0]), []byte(expectedMac)) != 1 {
-		m.logger.Errorf("verify failed. Our: %s Their: %s", expectedMac, checkMac[0])
+		m.logger.WithField("phase", "verifyRequest").Errorf("verify failed")
 		return false
 	}
 
@@ -188,10 +189,11 @@ func (m *Messenger) verifyRequest(header http.Header, body []byte) bool {
 }
 
 func (m *Messenger) createImgContent(bot *slack.Client, file slackevents.File) *imgur.ByteContent {
+	logger := m.logger.WithField("phase", "createImgContent")
 	imgBuffer := bytes.Buffer{}
 	err := bot.GetFile(file.URLPrivateDownload, &imgBuffer)
 	if err != nil {
-		m.logger.Error("download attached image failed: " + err.Error())
+		logger.Error("download attached image failed: " + err.Error())
 		return nil
 	}
 	content := imgur.ByteContent{
@@ -199,7 +201,7 @@ func (m *Messenger) createImgContent(bot *slack.Client, file slackevents.File) *
 	}
 	ext := file.Filetype
 	if ext == "" {
-		m.logger.Warnf("unknown attach image type: %s", ext)
+		logger.Warnf("unknown attach image type: %s", ext)
 		ext = "png"
 	}
 	content.Type = "image/" + ext
@@ -281,7 +283,9 @@ func (m *Messenger) handleMessage(teamID string, ev *slackevents.MessageEvent) {
 }
 
 func (m *Messenger) webhook(response http.ResponseWriter, request *http.Request) {
+	logger := m.logger.WithField("phase", "webhook")
 	body, err := ioutil.ReadAll(request.Body)
+	request.Body.Close()
 	if err != nil {
 		m.logger.Errorf("unable to read request body: %s", err.Error())
 		response.WriteHeader(http.StatusInternalServerError)
@@ -296,7 +300,7 @@ func (m *Messenger) webhook(response http.ResponseWriter, request *http.Request)
 	eventsAPIEvent, err := slackevents.ParseEvent(
 		json.RawMessage(body), slackevents.OptionNoVerifyToken())
 	if err != nil {
-		m.logger.Errorf("slackevents parsing failed: %s", err.Error())
+		logger.Warnf("slackevents parsing failed: %s", err.Error())
 		response.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -305,7 +309,7 @@ func (m *Messenger) webhook(response http.ResponseWriter, request *http.Request)
 		var challengeResponse slackevents.ChallengeResponse
 		err := json.Unmarshal(body, &challengeResponse)
 		if err != nil {
-			m.logger.Errorf("body unmarshal failed: %s", err.Error())
+			logger.Errorf("body unmarshal failed: %s", err.Error())
 			response.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -319,7 +323,6 @@ func (m *Messenger) webhook(response http.ResponseWriter, request *http.Request)
 		case *slackevents.MessageEvent:
 			m.handleMessage(eventsAPIEvent.TeamID, ev)
 		case *slackevents.TokensRevokedEvent:
-			m.logger.Infof("tokens revoked, team: %s", eventsAPIEvent.TeamID)
 			delete(m.botInfoMap, eventsAPIEvent.TeamID)
 			go func() { <-m.writeBotInfoToDB() }()
 		}
@@ -341,7 +344,7 @@ func (m *Messenger) oauth(response http.ResponseWriter, request *http.Request) {
 			oauthResp, err := slack.GetOAuthResponse(&http.Client{}, m.ClientID, m.ClientSecret, code, "")
 			if err != nil {
 				msg := fmt.Sprintf("oauth failed: %s", err.Error())
-				logger.Errorf(msg)
+				logger.Warnf(msg)
 				response.Write([]byte(msg))
 				return
 			}

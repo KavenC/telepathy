@@ -125,7 +125,6 @@ func (s *Service) notifHandler() {
 		err := s.notifPrevID.Add(notifID, nil, cache.DefaultExpiration)
 		if err != nil {
 			// skip duplicated notifications
-			logger.Warnf("duplicated notif ID: %s", notifID)
 			ret <- 200
 			continue
 		}

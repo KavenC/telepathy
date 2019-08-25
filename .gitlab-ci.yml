@@ -1,11 +1,21 @@
-image: golang:1.12
-
 stages:
   - go-test
+  - deploy
 
 telepathy-test:
   stage: go-test
+  image: golang:1.12
   services:
     - mongo:latest
   script:
     - go test -v -timeout 30s ./internal/pkg/telepathy/...
+
+staging:
+  stage: deploy
+  script:
+    - apt-get update -qy
+    - apt-get install -y ruby-dev
+    - gem install dpl
+    - dpl --provider=heroku --app=$STAGING_APP_NAME --api-key=$STAGING_API_KEY
+  only:
+    - master

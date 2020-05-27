@@ -24,7 +24,7 @@ type botInfoMap map[string]botInfo
 
 func (m *Messenger) writeBotInfoToDB() chan interface{} {
 	ret := make(chan interface{}, 1)
-
+	logger := m.logger.WithField("phase", "writeBotInfoToDB")
 	m.dbReq <- telepathy.DatabaseRequest{
 		Action: func(ctx context.Context, db *mongo.Database) interface{} {
 			data := bson.M{
@@ -35,7 +35,7 @@ func (m *Messenger) writeBotInfoToDB() chan interface{} {
 			result, err := collection.ReplaceOne(ctx,
 				map[string]string{"ID": dbID}, data, options.Replace().SetUpsert(true))
 			if err != nil {
-				m.logger.Error("error when writing table back to DB: " + err.Error())
+				logger.Error("error when writing table back to DB: " + err.Error())
 			}
 			return result
 		},

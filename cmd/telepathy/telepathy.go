@@ -43,7 +43,8 @@ func main() {
 		&fwd.Service{},
 		&twitch.Service{
 			ClientID:     os.Getenv("TWITCH_CLIENT_ID"),
-			WebsubSecret: []byte(os.Getenv("TWITCH_SECRET")),
+			ClientSecret: os.Getenv("TWITCH_SECRET"),
+			WebsubSecret: []byte(os.Getenv("TWITCH_WEBSUB_SECRET")),
 		},
 	}
 

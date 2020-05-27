@@ -10,6 +10,7 @@ import (
 
 	"github.com/patrickmn/go-cache"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
 const (
@@ -30,12 +31,28 @@ type twitchAPI struct {
 	logger *logrus.Entry
 }
 
-func newTwitchAPI() *twitchAPI {
-	return &twitchAPI{
-		httpClient:  &http.Client{},
+func newTwitchAPI(clientID, clientSecret, websubSecret string, webhookURL *url.URL, logger *logrus.Entry) *twitchAPI {
+	api := &twitchAPI{
 		userIDCache: cache.New(cacheExpire, cacheExpire),
 		gameCache:   cache.New(cacheExpire, cacheExpire),
 	}
+	api.logger = logger.WithField("module", "api")
+	api.clientID = clientID
+	api.clientSecret = clientSecret
+	api.initOauth2()
+	api.websubSecret = websubSecret
+	api.webhookURL = webhookURL
+	return api
+}
+
+func (t *twitchAPI) initOauth2() {
+	config := clientcredentials.Config{
+		ClientID:     t.clientID,
+		ClientSecret: t.clientSecret,
+		TokenURL:     "https://id.twitch.tv/oauth2/token",
+		Scopes:       []string{}, // We don't need any scope for current api usages
+	}
+	t.httpClient = config.Client(context.Background())
 }
 
 func (t *twitchAPI) newRequest(method, target string, body io.Reader) (*http.Request, error) {

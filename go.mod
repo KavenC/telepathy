@@ -1,5 +1,7 @@
 module gitlab.com/kavenc/telepathy
 
+go 1.14
+
 require (
 	github.com/bwmarrin/discordgo v0.19.0
 	github.com/go-stack/stack v1.8.0 // indirect
@@ -18,6 +20,7 @@ require (
 	github.com/xdg/stringprep v0.0.0-20180714160509-73f8eece6fdc // indirect
 	gitlab.com/kavenc/argo v0.0.0-20190816040936-7675ff0ae3a4
 	golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4 // indirect
+	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
 	golang.org/x/sync v0.0.0-20190423024810-112230192c58 // indirect
 	golang.org/x/sys v0.0.0-20190813064441-fde4db37ae7a // indirect
 	golang.org/x/text v0.3.2 // indirect

@@ -75,6 +75,9 @@ type Service struct {
 	// The client ID of twitch API
 	ClientID string
 
+	// The client secret of twitch API
+	ClientSecret string
+
 	logger *logrus.Entry
 }
 
@@ -101,11 +104,8 @@ func (s *Service) Start() {
 	s.dbCtx, s.dbCancel = context.WithCancel(context.Background())
 	s.dbDone = make(chan interface{})
 
-	s.api = newTwitchAPI()
-	s.api.clientID = s.ClientID
-	s.api.websubSecret = string(s.WebsubSecret)
-	s.api.webhookURL = s.webhookURL
-	s.api.logger = s.logger.WithField("module", "api")
+	s.api = newTwitchAPI(s.ClientID, s.ClientSecret,
+		string(s.WebsubSecret), s.webhookURL, s.logger)
 
 	s.subTopics = make(map[string]*table)
 

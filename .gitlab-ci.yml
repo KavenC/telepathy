@@ -4,11 +4,11 @@ stages:
 
 telepathy-test:
   stage: go-test
-  image: golang:1.12
+  image: golang:1.14-alpine
   services:
     - mongo:latest
   script:
-    - go test -v -timeout 30s ./internal/pkg/telepathy/...
+    - CGO_ENABLED=0 go test -v -timeout 30s ./internal/pkg/telepathy/...
 
 staging:
   stage: deploy

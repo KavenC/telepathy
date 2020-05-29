@@ -55,6 +55,6 @@ func show(state *argo.State, extras ...interface{}) error {
 	fmt.Fprintf(&state.OutputStr,
 		`Telepathy: Universal Messenger Botting Platform
 Version: alpha (%s)
-Source: https://gitlab.com/kavenc/telepathy`, version[:8])
+Source: https://gitlab.com/kavenc/telepathy`, version)
 	return nil
 }

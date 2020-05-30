@@ -20,7 +20,7 @@ staging:
     - |- 
         docker build --rm -t registry.heroku.com/${STAGING_APP_NAME}/web \
         --iidfile imageid.txt \
-        --build-arg version=$(git show HEAD --format="%h %cd" --date=format:"%Y-%b-%d %H:%M:%m UTC") .
+        --build-arg "version=$(git log --format="%h %cd" --date=format:"%Y-%b-%d %H:%M:%m UTC" HEAD -1)" .
     - docker login -u _ -p $STAGING_API_KEY registry.heroku.com
     - docker push registry.heroku.com/${STAGING_APP_NAME}/web
     - |-

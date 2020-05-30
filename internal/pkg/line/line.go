@@ -119,16 +119,7 @@ func (m *Messenger) transmitter() {
 		}
 
 		if message.Image != nil {
-			fullURL, err := message.Image.FullURL()
-			var prevURL string
-			if err == nil {
-				prevURL, err = message.Image.SmallThumbnailURL()
-			}
-			if err != nil {
-				m.logger.Error("unable to get image URL: " + err.Error())
-			} else {
-				messages = append(messages, linebot.NewImageMessage(fullURL, prevURL))
-			}
+			messages = append(messages, linebot.NewTextMessage("(image)"))
 		}
 
 		// Try to use reply token

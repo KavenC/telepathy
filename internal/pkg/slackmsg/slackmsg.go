@@ -132,16 +132,7 @@ func (m *Messenger) transmitter() {
 		text := strings.Builder{}
 		text.WriteString(message.Text)
 		if message.Image != nil {
-			imgURL, err := message.Image.FullURL()
-			if err == nil {
-				if text.Len() > 0 {
-					fmt.Fprintf(&text, "\n%s", imgURL)
-				} else {
-					text.WriteString(imgURL)
-				}
-			} else {
-				logger.Warnf("image get FullURL failed: %s", err.Error())
-			}
+			text.WriteString("(image)")
 		}
 
 		options = append(options, slack.MsgOptionText(text.String(), false))

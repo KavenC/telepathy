@@ -1,2 +1,3 @@
 #!/usr/bin/env bash
-docker build --rm -t telepathy --build-arg version=$(git rev-parse --short HEAD) .
+DATE=$(LC_TIME=utf8 date -u +"%Y-%b-%d %H:%M:%m UTC")
+docker build -t telepathy --build-arg version="dev ${DATE}" .
